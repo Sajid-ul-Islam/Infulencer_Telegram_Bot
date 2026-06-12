@@ -1,8 +1,8 @@
 from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ChatAction
-from bot.config import YOUTUBE_LINK, MEDIUM_LINK, INSTAGRAM_LINK, TWITTER_LINK, FACEBOOK_LINK
-from bot.rss import get_youtube_posts, get_medium_posts
+from bot.config import YOUTUBE_LINK, MEDIUM_LINK, INSTAGRAM_LINK, TWITTER_LINK, FACEBOOK_LINK, SUBSTACK_URL
+from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
 from bot.ai import get_ai_response
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -15,6 +15,7 @@ I share all my latest content from my platforms here. You can also ask me questi
 /latest - Get my latest content
 /youtube - Latest video
 /medium - Latest article
+/substack - Latest newsletter
 /socials - Links to all my platforms
 /ask - Ask me a question
 /help - Show all commands
@@ -27,6 +28,7 @@ async def socials_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <b>📚 My Platforms:</b>
 📺 <a href="{YOUTUBE_LINK}">YouTube</a> - Videos & Tutorials
 📝 <a href="{MEDIUM_LINK}">Medium</a> - In-depth Articles
+📰 <a href="{SUBSTACK_URL}">Substack</a> - Newsletters
 📸 <a href="{INSTAGRAM_LINK}">Instagram</a> - Behind the Scenes
 🐦 <a href="{TWITTER_LINK}">X/Twitter</a> - Updates & Discussions
 👍 <a href="{FACEBOOK_LINK}">Facebook</a> - Community
@@ -47,8 +49,13 @@ async def latest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if med_msg: 
         message += med_msg + "\n\n"
         if med_btn: buttons.append([med_btn])
+        
+    sub_msg, sub_btn, _ = await get_substack_posts(limit=2)
+    if sub_msg:
+        message += sub_msg + "\n\n"
+        if sub_btn: buttons.append([sub_btn])
     
-    if yt_msg or med_msg:
+    if yt_msg or med_msg or sub_msg:
         reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
         await update.message.reply_text(message, parse_mode="HTML", reply_markup=reply_markup)
     else:
@@ -71,6 +78,15 @@ async def medium(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(med_msg, parse_mode="HTML", reply_markup=reply_markup)
     else:
         await update.message.reply_text(f"No articles yet. Follow me on Medium: {MEDIUM_LINK}", parse_mode="HTML")
+
+async def substack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.chat.send_action(ChatAction.TYPING)
+    sub_msg, sub_btn, _ = await get_substack_posts(limit=3)
+    if sub_msg:
+        reply_markup = InlineKeyboardMarkup([[sub_btn]]) if sub_btn else None
+        await update.message.reply_text(sub_msg, parse_mode="HTML", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(f"No newsletters yet. Subscribe here: {SUBSTACK_URL}", parse_mode="HTML")
 
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.replace("/ask", "", 1).strip()
@@ -97,6 +113,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /latest - Get all latest content
 /youtube - Latest video
 /medium - Latest article
+/substack - Latest newsletter
 /socials - Links to all my platforms
 /ask - Ask me something
 /help - This message

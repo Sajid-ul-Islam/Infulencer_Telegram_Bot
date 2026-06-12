@@ -4,8 +4,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ
 from bot.database import load_faqs
 from bot.server import start_server_threads
-from bot.jobs import auto_post_youtube, auto_post_medium, greeting_post
-from bot.handlers.commands import start, socials_command, latest, youtube, medium, ask_command, help_command
+from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, greeting_post
+from bot.handlers.commands import start, socials_command, latest, youtube, medium, substack, ask_command, help_command
 from bot.handlers.admin import (
     postlatest_command, ban_command, mute_command, questions_command,
     poll_command, broadcast_command, addfaq_command, rmfaq_command,
@@ -20,6 +20,7 @@ async def post_init(application: Application):
         BotCommand("latest", "Get my latest content"),
         BotCommand("youtube", "Latest video"),
         BotCommand("medium", "Latest article"),
+        BotCommand("substack", "Latest newsletter"),
         BotCommand("socials", "Links to all my platforms"),
         BotCommand("ask", "Ask me a question"),
         BotCommand("suggest", "Suggest a geopolitics topic"),
@@ -40,6 +41,7 @@ def main():
     application.add_handler(CommandHandler("latest", latest))
     application.add_handler(CommandHandler("youtube", youtube))
     application.add_handler(CommandHandler("medium", medium))
+    application.add_handler(CommandHandler("substack", substack))
     application.add_handler(CommandHandler("ask", ask_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("suggest", suggest_command))
@@ -70,6 +72,7 @@ def main():
     job_queue = application.job_queue
     job_queue.run_daily(auto_post_youtube, time=datetime.time(9, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
     job_queue.run_daily(auto_post_medium, time=datetime.time(18, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
+    job_queue.run_daily(auto_post_substack, time=datetime.time(14, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
     job_queue.run_daily(greeting_post, time=datetime.time(8, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
     
     logger.info("Bot started successfully!")

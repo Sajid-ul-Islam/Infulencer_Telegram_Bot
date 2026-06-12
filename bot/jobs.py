@@ -1,11 +1,12 @@
 from telegram import InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot.config import logger, CHANNEL_ID
-from bot.rss import get_youtube_posts, get_medium_posts
+from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
 
 # Global state for duplicate prevention
 last_posted_youtube_url = None
 last_posted_medium_url = None
+last_posted_substack_url = None
 
 async def send_channel_message(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
     """Send message to your channel"""
@@ -44,6 +45,17 @@ async def auto_post_medium(context: ContextTypes.DEFAULT_TYPE):
             last_posted_medium_url = link
     except Exception as e:
         logger.error(f"Error in auto_post_medium: {e}")
+
+async def auto_post_substack(context: ContextTypes.DEFAULT_TYPE):
+    global last_posted_substack_url
+    try:
+        sub_msg, sub_btn, link = await get_substack_posts(limit=1)
+        if sub_msg and link and link != last_posted_substack_url:
+            reply_markup = InlineKeyboardMarkup([[sub_btn]]) if sub_btn else None
+            await send_channel_message(context, sub_msg, reply_markup=reply_markup)
+            last_posted_substack_url = link
+    except Exception as e:
+        logger.error(f"Error in auto_post_substack: {e}")
 
 async def greeting_post(context: ContextTypes.DEFAULT_TYPE):
     greeting = """

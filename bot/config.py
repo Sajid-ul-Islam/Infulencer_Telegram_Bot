@@ -36,6 +36,7 @@ INSTAGRAM_HANDLE = os.getenv("INSTAGRAM_HANDLE", "@bearded_bangali")
 
 YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://www.youtube.com/@bearded_bangali")
 MEDIUM_LINK = os.getenv("MEDIUM_LINK", "https://medium.com/@b3ngali")
+SUBSTACK_URL = os.getenv("SUBSTACK_URL", "https://beardedbangali.substack.com")
 INSTAGRAM_LINK = os.getenv("INSTAGRAM_LINK", "https://instagram.com/bearded_bangali")
 TWITTER_LINK = os.getenv("TWITTER_LINK", "https://x.com/Beraded_Bengali")
 FACEBOOK_LINK = os.getenv("FACEBOOK_LINK", "https://facebook.com/bb3ngali")

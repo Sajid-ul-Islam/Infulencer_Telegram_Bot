@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 from firebase_admin import firestore
 from bot.config import logger, is_admin, CHANNEL_ID
 from bot.database import db, FAQ, save_faq, remove_faq
-from bot.jobs import send_channel_message, auto_post_youtube, auto_post_medium
+from bot.jobs import send_channel_message, auto_post_youtube, auto_post_medium, auto_post_substack
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -53,6 +53,7 @@ async def postlatest_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("🔄 Broadcasting latest content to channel...")
     await auto_post_youtube(context)
     await auto_post_medium(context)
+    await auto_post_substack(context)
     await update.message.reply_text("✅ Done!")
 
 async def questions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
