@@ -1,5 +1,5 @@
 import datetime
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ
 from bot.database import load_faqs
@@ -14,11 +14,25 @@ from bot.handlers.admin import (
 )
 from bot.handlers.messages import handle_message, welcome_new_members, button_callback_handler
 
+async def post_init(application: Application):
+    commands = [
+        BotCommand("start", "Welcome message"),
+        BotCommand("latest", "Get my latest content"),
+        BotCommand("youtube", "Latest video"),
+        BotCommand("medium", "Latest article"),
+        BotCommand("socials", "Links to all my platforms"),
+        BotCommand("ask", "Ask me a question"),
+        BotCommand("suggest", "Suggest a geopolitics topic"),
+        BotCommand("help", "Show all commands")
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot commands menu updated.")
+
 def main():
     start_server_threads()
 
     load_faqs()
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     
     # Basic commands
     application.add_handler(CommandHandler("start", start))
