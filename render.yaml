@@ -7,7 +7,7 @@ services:
     
     # If using 'python' env instead of 'docker', uncomment these:
     # buildCommand: pip install -r requirements.txt
-    # startCommand: python telegram_bot.py
+    # startCommand: python main.py
 
     # Environment variables that need to be set in the Render Dashboard
     envVars:
