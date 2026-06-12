@@ -446,10 +446,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not response:
         response = get_faq_response(user_message)
 
-    await update.message.reply_text(response, parse_mode="HTML")
+    await update.message.reply_text(response, parse_mode="HTML", reply_to_message_id=update.message.message_id)
     logger.info(f"Answered question from {user_id}: {user_message[:50]}")
 
 # ============ ADMIN COMMANDS ============
+
+async def postlatest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ You don't have permission to use this command.")
+        return
+
+    await update.message.reply_text("🔄 Broadcasting latest content to channel...")
+    await auto_post_youtube(context)
+    await auto_post_medium(context)
+    await update.message.reply_text("✅ Done!")
 
 async def questions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -606,6 +616,19 @@ Find all my latest updates here. Got a question? Just DM the bot!
 
 # ============ MAIN APPLICATION ============
 
+async def post_init(application: Application):
+    """Set the bot's command menu visible to followers."""
+    await application.bot.set_my_commands([
+        ("start", "Welcome message"),
+        ("latest", "Get all latest content"),
+        ("youtube", "Latest video"),
+        ("medium", "Latest article"),
+        ("socials", "Links to all my platforms"),
+        ("ask", "Ask me something"),
+        ("help", "Show all commands")
+    ])
+    logger.info("Bot commands menu configured successfully.")
+
 def start_dummy_server():
     """Starts a dummy HTTP server to satisfy Render's Web Service port binding requirement."""
     port = int(os.environ.get("PORT", 8080))
@@ -629,7 +652,7 @@ def main():
     logger.info("Dummy web server started to keep Render happy!")
 
     load_faqs()
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("socials", socials_command))
@@ -640,6 +663,7 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     
     # Admin commands
+    application.add_handler(CommandHandler("postlatest", postlatest_command))
     application.add_handler(CommandHandler("questions", questions_command))
     application.add_handler(CommandHandler("poll", poll_command))
     application.add_handler(CommandHandler("broadcast", broadcast_command))
