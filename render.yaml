@@ -1,0 +1,23 @@
+services:
+  # Using 'worker' instead of 'web' because a polling Telegram bot doesn't expose a web port
+  - type: worker
+    name: telegram-content-bot
+    env: docker # Set to 'python' if you prefer to use the native Python environment instead of Docker
+    plan: free
+    
+    # If using 'python' env instead of 'docker', uncomment these:
+    # buildCommand: pip install -r requirements.txt
+    # startCommand: python telegram_bot.py
+
+    # Environment variables that need to be set in the Render Dashboard
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: CHANNEL_ID
+        sync: false
+      - key: GROUP_ID
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: FIREBASE_CREDENTIALS
+        sync: false
