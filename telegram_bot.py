@@ -13,7 +13,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ChatAction
-import httpx
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -28,7 +28,6 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 GROUP_ID = os.getenv("GROUP_ID")
 ADMIN_ID = os.getenv("ADMIN_ID")
 FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS")
-XAI_API_KEY = os.getenv("XAI_API_KEY")
 
 # Initialize Firebase
 db = None
@@ -54,14 +53,6 @@ FACEBOOK_LINK = "https://facebook.com/bb3ngali"
 # Global state for duplicate prevention
 last_posted_youtube_url = None
 last_posted_medium_url = None
-
-# Load Mock Knowledge Base for RAG
-try:
-    with open("knowledge_base.json", "r", encoding="utf-8") as f:
-        KNOWLEDGE_BASE = json.load(f)
-except Exception as e:
-    logger.error(f"Error loading knowledge base: {e}")
-    KNOWLEDGE_BASE = []
 
 # ============ FAQ RESPONSES ============
 # In-memory FAQ storage (will sync with Firestore if enabled)
@@ -179,142 +170,6 @@ async def get_medium_posts(limit=3, return_url_only=False):
     
     if return_url_only: return None
     return None, None, None
-
-def search_knowledge_base(query: str) -> str:
-    """Mock vector search using basic keyword matching"""
-    query_lower = query.lower()
-    results = []
-    for post in KNOWLEDGE_BASE:
-        # Simple scoring based on term presence
-        score = sum(1 for word in query_lower.split() if word in post["content"].lower() or word in post["title"].lower())
-        if score > 0:
-            results.append((score, post))
-            
-    # Sort by score descending and take top 2
-    results.sort(key=lambda x: x[0], reverse=True)
-    top_results = results[:2]
-    
-    if not top_results:
-        return "No relevant past posts found for this query."
-        
-    formatted_results = []
-    for _, post in top_results:
-        formatted_results.append(
-            f"Platform: {post['platform']}\nTitle: {post['title']}\nContent: {post['content']}\nLink: {post['url']}"
-        )
-    return "\n\n---\n\n".join(formatted_results)
-
-async def get_grok_response(user_message: str) -> str:
-    """Get dynamic response from xAI's Grok API with Tool Calling (Agentic RAG)"""
-    if not XAI_API_KEY:
-        return None
-        
-    system_prompt = f"""
-You are the official Telegram assistant for Bearded Bangali, a tech and lifestyle content creator.
-Your job is to answer questions enthusiastically and politely using the following context.
-If the user greets you with "Salam" or any variation, you MUST reply with "Walaikum Assalam". Otherwise, always maintain a polite, respectful tone.
-Do not invent facts about him. Keep answers concise (1-3 sentences max).
-
-If a user asks a specific question about his past content, gear, or opinions, YOU MUST USE the `search_knowledge_base` tool to retrieve his actual past posts before answering.
-
-Current known FAQs/Facts:
-{json.dumps(FAQ, indent=2)}
-
-Social Media Links:
-- YouTube: {YOUTUBE_LINK}
-- Medium: {MEDIUM_LINK}
-- Instagram: {INSTAGRAM_LINK}
-- X/Twitter: {TWITTER_LINK}
-- Facebook: {FACEBOOK_LINK}
-"""
-    
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "search_knowledge_base",
-                "description": "Searches the creator's past YouTube, Medium, and Instagram posts to answer specific questions about their gear, opinions, or past content.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query (e.g. 'camera setup', 'editing software', 'final cut')"
-                        }
-                    },
-                    "required": ["query"]
-                }
-            }
-        }
-    ]
-
-    messages = [
-        {"role": "system", "content": system_prompt.strip()},
-        {"role": "user", "content": user_message}
-    ]
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            # First Call to Grok
-            response = await client.post(
-                "https://api.x.ai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {XAI_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "messages": messages,
-                    "model": "grok-beta",
-                    "tools": tools,
-                    "tool_choice": "auto",
-                    "stream": False,
-                    "temperature": 0.7
-                }
-            )
-            response.raise_for_status()
-            data = response.json()
-            message = data["choices"][0]["message"]
-            
-            # Check if Grok wants to use a tool
-            if message.get("tool_calls"):
-                messages.append(message) # Append the assistant's tool call message
-                
-                for tool_call in message["tool_calls"]:
-                    if tool_call["function"]["name"] == "search_knowledge_base":
-                        args = json.loads(tool_call["function"]["arguments"])
-                        search_result = search_knowledge_base(args["query"])
-                        
-                        # Provide the tool result back to Grok
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call["id"],
-                            "content": search_result
-                        })
-                
-                # Second Call to Grok to get the final answer
-                final_response = await client.post(
-                    "https://api.x.ai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {XAI_API_KEY}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "messages": messages,
-                        "model": "grok-beta",
-                        "stream": False,
-                        "temperature": 0.7
-                    }
-                )
-                final_response.raise_for_status()
-                final_data = final_response.json()
-                return final_data["choices"][0]["message"]["content"]
-            
-            # If no tool was called, return the direct response
-            return message.get("content")
-            
-    except Exception as e:
-        logger.error(f"Error calling Grok API: {e}")
-        return None
 
 def get_faq_response(user_message: str) -> str:
     """Match user question to FAQ"""
@@ -459,9 +314,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.chat.send_action(ChatAction.TYPING)
 
-    response = await get_grok_response(user_message)
-    if not response:
-        response = get_faq_response(user_message)
+    response = get_faq_response(user_message)
 
     await update.message.reply_text(response, parse_mode="HTML", reply_to_message_id=update.message.message_id)
     logger.info(f"Answered question from {user_id}: {user_message[:50]}")
@@ -684,18 +537,20 @@ async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 # ============ MAIN APPLICATION ============
 
-async def post_init(application: Application):
-    """Set the bot's command menu visible to followers."""
-    await application.bot.set_my_commands([
-        ("start", "Welcome message"),
-        ("latest", "Get all latest content"),
-        ("youtube", "Latest video"),
-        ("medium", "Latest article"),
-        ("socials", "Links to all my platforms"),
-        ("ask", "Ask me something"),
-        ("help", "Show all commands")
-    ])
-    logger.info("Bot commands menu configured successfully.")
+def ping_self():
+    """Pings the bot's own Render URL every 10 minutes to prevent sleeping."""
+    url = os.getenv("RENDER_EXTERNAL_URL")
+    if not url:
+        logger.warning("RENDER_EXTERNAL_URL not set. Self-ping will not work.")
+        return
+        
+    while True:
+        try:
+            time.sleep(600)  # Sleep 10 minutes
+            response = requests.get(url)
+            logger.info(f"Self-ping executed: Status {response.status_code}")
+        except Exception as e:
+            logger.error(f"Self-ping failed: {e}")
 
 def start_dummy_server():
     """Starts a dummy HTTP server to satisfy Render's Web Service port binding requirement."""
@@ -717,10 +572,15 @@ def main():
     # Start the dummy server in a background thread
     server_thread = threading.Thread(target=start_dummy_server, daemon=True)
     server_thread.start()
-    logger.info("Dummy web server started to keep Render happy!")
+    
+    # Start the self-ping thread
+    ping_thread = threading.Thread(target=ping_self, daemon=True)
+    ping_thread.start()
+    
+    logger.info("Dummy web server & self-pinger started to keep Render happy!")
 
     load_faqs()
-    application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("socials", socials_command))
