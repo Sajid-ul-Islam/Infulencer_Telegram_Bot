@@ -3,6 +3,8 @@ import logging
 import shlex
 import json
 from datetime import datetime, time
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import feedparser
 import requests
 from telegram import Update
@@ -604,7 +606,28 @@ Find all my latest updates here. Got a question? Just DM the bot!
 
 # ============ MAIN APPLICATION ============
 
+def start_dummy_server():
+    """Starts a dummy HTTP server to satisfy Render's Web Service port binding requirement."""
+    port = int(os.environ.get("PORT", 8080))
+    class DummyHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b"Bot is running!")
+        # Suppress logging to keep the console clean
+        def log_message(self, format, *args):
+            pass
+            
+    server = HTTPServer(('0.0.0.0', port), DummyHandler)
+    server.serve_forever()
+
 def main():
+    # Start the dummy server in a background thread
+    server_thread = threading.Thread(target=start_dummy_server, daemon=True)
+    server_thread.start()
+    logger.info("Dummy web server started to keep Render happy!")
+
     load_faqs()
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
