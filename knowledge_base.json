@@ -1,0 +1,26 @@
+[
+  {
+    "id": "yt_1",
+    "platform": "YouTube",
+    "title": "My Editing Workflow for 2026",
+    "content": "I've officially switched entirely to Adobe Premiere Pro for all my video editing. The new AI masking features have saved me hours of time! My typical workflow takes about 4 hours per video now. I color grade everything using Lumetri.",
+    "url": "https://www.youtube.com/watch?v=dummy1",
+    "date": "2026-05-10"
+  },
+  {
+    "id": "med_1",
+    "platform": "Medium",
+    "title": "Why I Stopped Using Final Cut",
+    "content": "A lot of people ask why I moved away from Final Cut Pro. Honestly, it's just the ecosystem. Working with After Effects and Premiere is so seamless. Final Cut is great for beginners, but Premiere is what the industry uses.",
+    "url": "https://medium.com/@b3ngali/dummy2",
+    "date": "2026-04-15"
+  },
+  {
+    "id": "ig_1",
+    "platform": "Instagram",
+    "title": "New Studio Setup",
+    "content": "Just finished setting up the new studio! The main camera is now a Sony A7S III with a 24-70mm G-Master lens. Lighting is a single Aputure 120d with a light dome. Audio is handled by the Shure SM7B into a GoXLR.",
+    "url": "https://instagram.com/p/dummy3",
+    "date": "2026-06-01"
+  }
+]
