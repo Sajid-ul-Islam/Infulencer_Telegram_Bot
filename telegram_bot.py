@@ -14,6 +14,7 @@ from firebase_admin import credentials, firestore
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ChatAction
 import time
+import httpx
 
 # Configure logging
 logging.basicConfig(
@@ -28,6 +29,7 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 GROUP_ID = os.getenv("GROUP_ID")
 ADMIN_ID = os.getenv("ADMIN_ID")
 FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS")
+XAI_API_KEY = os.getenv("XAI_API_KEY")
 
 # Initialize Firebase
 db = None
@@ -53,6 +55,14 @@ FACEBOOK_LINK = "https://facebook.com/bb3ngali"
 # Global state for duplicate prevention
 last_posted_youtube_url = None
 last_posted_medium_url = None
+
+# Load Mock Knowledge Base for RAG
+try:
+    with open("knowledge_base.json", "r", encoding="utf-8") as f:
+        KNOWLEDGE_BASE = json.load(f)
+except Exception as e:
+    logger.error(f"Error loading knowledge base: {e}")
+    KNOWLEDGE_BASE = []
 
 # ============ FAQ RESPONSES ============
 # In-memory FAQ storage (will sync with Firestore if enabled)
@@ -171,28 +181,158 @@ async def get_medium_posts(limit=3, return_url_only=False):
     if return_url_only: return None
     return None, None, None
 
+def search_knowledge_base(query: str) -> str:
+    """Mock vector search using basic keyword matching"""
+    query_lower = query.lower()
+    results = []
+    for post in KNOWLEDGE_BASE:
+        # Simple scoring based on term presence
+        score = sum(1 for word in query_lower.split() if word in post["content"].lower() or word in post["title"].lower())
+        if score > 0:
+            results.append((score, post))
+            
+    # Sort by score descending and take top 2
+    results.sort(key=lambda x: x[0], reverse=True)
+    top_results = results[:2]
+    
+    if not top_results:
+        return "No relevant past posts found for this query."
+        
+    formatted_results = []
+    for _, post in top_results:
+        formatted_results.append(
+            f"Platform: {post['platform']}\nTitle: {post['title']}\nContent: {post['content']}\nLink: {post['url']}"
+        )
+    return "\n\n---\n\n".join(formatted_results)
+
+async def get_grok_response(user_message: str) -> str:
+    """Get dynamic response from xAI's Grok API with Tool Calling (Agentic RAG)"""
+    if not XAI_API_KEY:
+        return None
+        
+    system_prompt = f"""
+You are the official Telegram assistant for Bearded Bangali, a tech and lifestyle content creator.
+Your job is to answer questions enthusiastically and politely using the following context.
+If the user greets you with "Salam" or any variation, you MUST reply with "Walikumus Salam". Otherwise, always maintain a polite, respectful tone.
+Do not invent facts about him. Keep answers concise (1-3 sentences max).
+
+If a user asks a specific question about his past content, gear, or opinions, YOU MUST USE the `search_knowledge_base` tool to retrieve his actual past posts before answering.
+
+Current known FAQs/Facts:
+{json.dumps(FAQ, indent=2)}
+
+Social Media Links:
+- YouTube: {YOUTUBE_LINK}
+- Medium: {MEDIUM_LINK}
+- Instagram: {INSTAGRAM_LINK}
+- X/Twitter: {TWITTER_LINK}
+- Facebook: {FACEBOOK_LINK}
+"""
+    
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_knowledge_base",
+                "description": "Searches the creator's past YouTube, Medium, and Instagram posts to answer specific questions about their gear, opinions, or past content.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query (e.g. 'camera setup', 'editing software', 'final cut')"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        }
+    ]
+
+    messages = [
+        {"role": "system", "content": system_prompt.strip()},
+        {"role": "user", "content": user_message}
+    ]
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # First Call to Grok
+            response = await client.post(
+                "https://api.x.ai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {XAI_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "messages": messages,
+                    "model": "grok-beta",
+                    "tools": tools,
+                    "tool_choice": "auto",
+                    "stream": False,
+                    "temperature": 0.7
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            message = data["choices"][0]["message"]
+            
+            # Check if Grok wants to use a tool
+            if message.get("tool_calls"):
+                messages.append(message) # Append the assistant's tool call message
+                
+                for tool_call in message["tool_calls"]:
+                    if tool_call["function"]["name"] == "search_knowledge_base":
+                        args = json.loads(tool_call["function"]["arguments"])
+                        search_result = search_knowledge_base(args["query"])
+                        
+                        # Provide the tool result back to Grok
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": search_result
+                        })
+                
+                # Second Call to Grok to get the final answer
+                final_response = await client.post(
+                    "https://api.x.ai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {XAI_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "messages": messages,
+                        "model": "grok-beta",
+                        "stream": False,
+                        "temperature": 0.7
+                    }
+                )
+                final_response.raise_for_status()
+                final_data = final_response.json()
+                return final_data["choices"][0]["message"]["content"]
+            
+            # If no tool was called, return the direct response
+            return message.get("content")
+            
+    except Exception as e:
+        logger.error(f"Error calling Grok API: {e}")
+        return None
+
 def get_faq_response(user_message: str) -> str:
     """Match user question to FAQ"""
     user_message_lower = user_message.lower()
     
     if any(word in user_message_lower for word in ["salam", "assalam", "salam alaikum"]):
-        return "Walaikum Assalam! 😊\nHow can I help you today? Type /help to see what I can do."
+        return "Walikumus Salam! 😊\nHow can I help you today? Type /help to see what I can do."
         
     for keyword, response in FAQ.items():
         if keyword in user_message_lower:
             return response
     
-    return (
-        "Thanks for your question! 😊\n\n"
-        "If you didn't find the answer, try /socials to see all my platforms!\n\n"
-        "You can also ask me directly in the group!"
-    )
-
-# ============ COMMAND HANDLERS ============
+    return None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = f"""
-👋 <b>As-salamu alaykum! Welcome to my content hub!</b>
+👋 <b>Assalamu Alaikum! Welcome to my content hub!</b>
 
 I share all my latest content from my platforms here. You can also ask me questions about my content!
 
@@ -259,12 +399,22 @@ async def medium(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"No articles yet. Follow me on Medium: {MEDIUM_LINK}", parse_mode="HTML")
 
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "❓ <b>Ask me anything!</b>\n\n"
-        "Just type your question and I'll try to help.\n"
-        "Common topics: editing, content creation, collaborations, etc.",
-        parse_mode="HTML"
-    )
+    query = update.message.text.replace("/ask", "", 1).strip()
+    if not query:
+        await update.message.reply_text(
+            "❓ <b>Ask me anything!</b>\n\n"
+            "Usage: /ask <your question>\n"
+            "Example: /ask What camera do you use?",
+            parse_mode="HTML"
+        )
+        return
+        
+    await update.message.chat.send_action(ChatAction.TYPING)
+    response = await get_grok_response(query)
+    if not response:
+        response = "I'm having trouble thinking right now. Please try again later!"
+        
+    await update.message.reply_text(response, parse_mode="HTML")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
@@ -312,12 +462,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Firebase error: {e}")
 
-    await update.message.chat.send_action(ChatAction.TYPING)
+    # Smart filtering for Grok AI
+    should_use_ai = False
+    
+    # 1. Direct message (Private chat)
+    if update.message.chat.type == "private":
+        should_use_ai = True
+        
+    # 2. Reply to bot's message
+    elif update.message.reply_to_message and update.message.reply_to_message.from_user.id == context.bot.id:
+        should_use_ai = True
+        
+    # 3. Mentioned explicitly
+    elif context.bot.username and f"@{context.bot.username}" in user_message:
+        should_use_ai = True
+        
+    if should_use_ai:
+        await update.message.chat.send_action(ChatAction.TYPING)
+        response = await get_grok_response(user_message)
+        if not response:
+            response = get_faq_response(user_message)
+            if not response:
+                response = "Walaikum Assalam! 😊 How can I help you today? Type /help to see what I can do."
+    else:
+        # Silent FAQ check for groups
+        response = get_faq_response(user_message)
 
-    response = get_faq_response(user_message)
-
-    await update.message.reply_text(response, parse_mode="HTML", reply_to_message_id=update.message.message_id)
-    logger.info(f"Answered question from {user_id}: {user_message[:50]}")
+    if response:
+        await update.message.reply_text(response, parse_mode="HTML", reply_to_message_id=update.message.message_id)
+        logger.info(f"Answered question from {user_id}: {user_message[:50]}")
 
 # ============ ADMIN COMMANDS ============
 
@@ -514,7 +687,7 @@ async def auto_post_medium(context: ContextTypes.DEFAULT_TYPE):
 
 async def greeting_post(context: ContextTypes.DEFAULT_TYPE):
     greeting = """
-✨ <b>As-salamu alaykum!</b>
+✨ <b>Assalamu Alaikum!</b>
 
 Welcome to my content hub! 
 
@@ -530,7 +703,7 @@ async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE
     for member in update.message.new_chat_members:
         if member.is_bot: continue
         welcome_text = (
-            f"👋 As-salamu alaykum and welcome to the community, <a href='tg://user?id={member.id}'>{member.first_name}</a>!\n\n"
+            f"👋 Assalamu Alaikum and welcome to the community, <a href='tg://user?id={member.id}'>{member.first_name}</a>!\n\n"
             f"Feel free to ask questions here, or check out the latest content by typing /youtube."
         )
         await update.message.reply_text(welcome_text, parse_mode="HTML")
