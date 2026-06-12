@@ -11,10 +11,11 @@ import requests
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ChatPermissions
 import firebase_admin
 from firebase_admin import credentials, firestore
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from telegram.constants import ChatAction
 import time
 import httpx
+import random
 
 # Configure logging
 logging.basicConfig(
@@ -661,6 +662,184 @@ async def listfaq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"<b>{k}</b>: {v[:50]}...\n"
     await update.message.reply_text(msg, parse_mode="HTML")
 
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ You don't have permission.")
+        return
+        
+    if not db:
+        await update.message.reply_text("Database not configured.")
+        return
+        
+    await update.message.reply_text("📊 Calculating stats...")
+    
+    try:
+        q_count = len(list(db.collection("questions").stream()))
+        s_count = len(list(db.collection("suggestions").stream()))
+        g_count = len(list(db.collection("giveaway_entries").stream()))
+        faq_count = len(FAQ)
+        
+        stats = (
+            "📊 <b>Admin Dashboard Stats:</b>\n\n"
+            f"❓ Total Questions Asked: <b>{q_count}</b>\n"
+            f"💡 Total Suggestions: <b>{s_count}</b>\n"
+            f"🎁 Current Giveaway Entries: <b>{g_count}</b>\n"
+            f"📚 Active Custom FAQs: <b>{faq_count}</b>"
+        )
+        await update.message.reply_text(stats, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error fetching stats: {e}")
+        await update.message.reply_text("Error fetching statistics.")
+
+async def suggest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    suggestion = update.message.text.replace("/suggest", "", 1).strip()
+    if not suggestion:
+        await update.message.reply_text(
+            "💡 <b>Suggestion Box</b>\n\n"
+            "Have an idea for a geopolitics topic or video? Let me know!\n"
+            "Usage: /suggest <your idea>",
+            parse_mode="HTML"
+        )
+        return
+        
+    if db:
+        try:
+            db.collection("suggestions").add({
+                "user_id": update.effective_user.id,
+                "username": update.effective_user.first_name,
+                "suggestion": suggestion,
+                "timestamp": firestore.SERVER_TIMESTAMP
+            })
+            await update.message.reply_text("✅ Your suggestion has been saved! Thank you for contributing.")
+        except Exception as e:
+            logger.error(f"Error saving suggestion: {e}")
+            await update.message.reply_text("Sorry, there was an error saving your suggestion.")
+    else:
+        await update.message.reply_text("Database is currently disabled.")
+
+async def listsuggestions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ You don't have permission.")
+        return
+        
+    if not db:
+        await update.message.reply_text("Database not configured.")
+        return
+        
+    try:
+        docs = db.collection("suggestions").order_by("timestamp", direction="DESCENDING").limit(10).stream()
+        message = "💡 <b>Latest Geopolitics Suggestions:</b>\n\n"
+        count = 0
+        for doc in docs:
+            row = doc.to_dict()
+            message += f"👤 <b>{row.get('username')}</b>:\n{row.get('suggestion')}\n\n"
+            count += 1
+            
+        if count == 0:
+            await update.message.reply_text("No suggestions found.")
+            return
+            
+        await update.message.reply_text(message, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error listing suggestions: {e}")
+        await update.message.reply_text("Error retrieving suggestions.")
+
+async def startgiveaway_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ You don't have permission.")
+        return
+
+    prize = update.message.text.replace("/startgiveaway", "", 1).strip()
+    if not prize:
+        await update.message.reply_text("Usage: /startgiveaway <Prize Name>")
+        return
+
+    if db:
+        try:
+            docs = db.collection("giveaway_entries").stream()
+            for doc in docs:
+                doc.reference.delete()
+        except Exception as e:
+            logger.error(f"Error clearing old giveaways: {e}")
+
+    message = (
+        f"🎁 <b>GIVEAWAY ALERT!</b> 🎁\n\n"
+        f"We are giving away: <b>{prize}</b>\n\n"
+        f"Click the button below to enter!"
+    )
+    
+    keyboard = [[InlineKeyboardButton("Enter Giveaway 🎉", callback_data="enter_giveaway")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if CHANNEL_ID:
+        await context.bot.send_message(chat_id=CHANNEL_ID, text=message, parse_mode="HTML", reply_markup=reply_markup)
+        await update.message.reply_text("✅ Giveaway posted to channel!")
+    else:
+        await update.message.reply_text(message, parse_mode="HTML", reply_markup=reply_markup)
+
+async def pickwinner_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ You don't have permission.")
+        return
+
+    if not db:
+        await update.message.reply_text("Database not configured.")
+        return
+
+    try:
+        docs = list(db.collection("giveaway_entries").stream())
+        if not docs:
+            await update.message.reply_text("No one has entered the giveaway yet!")
+            return
+            
+        winner_doc = random.choice(docs)
+        winner_data = winner_doc.to_dict()
+        winner_name = winner_data.get('username', 'Unknown')
+        winner_id = winner_data.get('user_id')
+        
+        announcement = (
+            f"🎊 <b>GIVEAWAY WINNER!</b> 🎊\n\n"
+            f"Congratulations <a href='tg://user?id={winner_id}'>{winner_name}</a>! You have won the giveaway!\n"
+            f"Please DM the admin to claim your prize."
+        )
+        
+        if CHANNEL_ID:
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=announcement, parse_mode="HTML")
+            await update.message.reply_text("✅ Winner announced in channel!")
+        else:
+            await update.message.reply_text(announcement, parse_mode="HTML")
+            
+    except Exception as e:
+        logger.error(f"Error picking winner: {e}")
+        await update.message.reply_text("Error picking winner.")
+
+async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    
+    if query.data == "enter_giveaway":
+        if not db:
+            await query.answer("Database not configured.", show_alert=True)
+            return
+            
+        user_id = query.from_user.id
+        username = query.from_user.first_name
+        
+        try:
+            doc_ref = db.collection("giveaway_entries").document(str(user_id))
+            doc = doc_ref.get()
+            if doc.exists:
+                await query.answer("You have already entered! Good luck! 🍀", show_alert=True)
+            else:
+                doc_ref.set({
+                    "user_id": user_id,
+                    "username": username,
+                    "timestamp": firestore.SERVER_TIMESTAMP
+                })
+                await query.answer("🎉 You have successfully entered the giveaway!", show_alert=True)
+        except Exception as e:
+            logger.error(f"Giveaway entry error: {e}")
+            await query.answer("An error occurred. Please try again.", show_alert=True)
+
 # ============ SCHEDULED POSTING ============
 
 async def auto_post_youtube(context: ContextTypes.DEFAULT_TYPE):
@@ -762,6 +941,7 @@ def main():
     application.add_handler(CommandHandler("medium", medium))
     application.add_handler(CommandHandler("ask", ask_command))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("suggest", suggest_command))
     
     # Admin commands
     application.add_handler(CommandHandler("postlatest", postlatest_command))
@@ -773,6 +953,13 @@ def main():
     application.add_handler(CommandHandler("addfaq", addfaq_command))
     application.add_handler(CommandHandler("rmfaq", rmfaq_command))
     application.add_handler(CommandHandler("listfaq", listfaq_command))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("listsuggestions", listsuggestions_command))
+    application.add_handler(CommandHandler("startgiveaway", startgiveaway_command))
+    application.add_handler(CommandHandler("pickwinner", pickwinner_command))
+    
+    # Callback handlers
+    application.add_handler(CallbackQueryHandler(button_callback_handler))
     
     # Message handlers
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members))
