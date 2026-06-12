@@ -1,9 +1,13 @@
 import os
 import logging
+import shlex
+import json
 from datetime import datetime
 import feedparser
 import requests
 from telegram import Update
+import firebase_admin
+from firebase_admin import credentials, firestore
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ChatAction
 
@@ -18,6 +22,19 @@ logger = logging.getLogger(__name__)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")  # Get from environment
 CHANNEL_ID = os.getenv("CHANNEL_ID")  # Your channel ID (e.g., -100123456789)
 GROUP_ID = os.getenv("GROUP_ID")  # Optional: Your group ID for Q&A
+ADMIN_ID = os.getenv("ADMIN_ID")  # Optional: Your personal User ID for admin commands
+FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS")
+
+# Initialize Firebase
+db = None
+if FIREBASE_CREDENTIALS:
+    try:
+        cred_dict = json.loads(FIREBASE_CREDENTIALS)
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred)
+        db = firestore.client()
+    except Exception as e:
+        logger.error(f"Error initializing Firebase: {e}")
 
 # Your content platforms (update with your actual URLs)
 YOUTUBE_CHANNEL_ID = "UCdFRSOdsaGPThmEsZb1tjXw"  # Get from YouTube channel URL
@@ -33,9 +50,9 @@ FACEBOOK_LINK = "https://facebook.com/bb3ngali"
 FAQ = {
     "how do you": "Check my YouTube channel for tutorials! Visit: " + YOUTUBE_LINK,
     "edit": "I use Adobe Premiere Pro for video editing. Tutorial coming soon!",
-    "content": "I create content about [your topic]. Subscribe to Medium for deep dives: " + MEDIUM_LINK,
+    "content": "I create content about tech and lifestyle. Subscribe to Medium for deep dives: " + MEDIUM_LINK,
     "collab": "For collaboration inquiries, DM me on Instagram: " + INSTAGRAM_LINK,
-    "upload": "I upload new videos every [your schedule]",
+    "upload": "I upload new videos every week",
     "subscribe": "Subscribe to all my platforms:\n" +
                  f"📺 YouTube: {YOUTUBE_LINK}\n" +
                  f"📝 Medium: {MEDIUM_LINK}\n" +
@@ -239,12 +256,92 @@ Type any question and I'll answer based on my knowledge.
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle regular messages (questions)"""
     user_message = update.message.text
+    user_id = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name
     
+    # Save to database
+    if db:
+        try:
+            db.collection("questions").add({
+                "user_id": user_id,
+                "username": username,
+                "question": user_message,
+                "timestamp": firestore.SERVER_TIMESTAMP
+            })
+        except Exception as e:
+            logger.error(f"Firebase error: {e}")
+
     # Get FAQ response
     response = get_faq_response(user_message)
     
     await update.message.reply_text(response, parse_mode="HTML")
-    logger.info(f"Answered question from {update.effective_user.id}: {user_message[:50]}")
+    logger.info(f"Answered question from {user_id}: {user_message[:50]}")
+
+async def questions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View recent questions (Admin only)"""
+    user_id = str(update.effective_user.id)
+    if ADMIN_ID and user_id != ADMIN_ID:
+        await update.message.reply_text("⛔ You don't have permission to use this command.")
+        return
+
+    if not db:
+        await update.message.reply_text("Firebase is not configured.")
+        return
+
+    try:
+        docs = db.collection("questions").order_by("timestamp", direction="DESCENDING").limit(10).stream()
+        
+        message = "📝 <b>Recent Questions:</b>\n\n"
+        count = 0
+        for doc in docs:
+            row = doc.to_dict()
+            dt = row.get('timestamp')
+            time_str = dt.strftime('%Y-%m-%d %H:%M:%S') if dt else "Unknown time"
+            message += f"👤 <b>{row.get('username')}</b> ({time_str}):\n{row.get('question')}\n\n"
+            count += 1
+
+        if count == 0:
+            await update.message.reply_text("No questions found.")
+            return
+        
+        await update.message.reply_text(message, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Firebase error: {e}")
+        await update.message.reply_text("Error retrieving questions.")
+
+async def poll_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Create a poll in the channel (Admin only)"""
+    user_id = str(update.effective_user.id)
+    if ADMIN_ID and user_id != ADMIN_ID:
+        await update.message.reply_text("⛔ You don't have permission to use this command.")
+        return
+
+    try:
+        args = shlex.split(update.message.text)[1:]
+        if len(args) < 3:
+            await update.message.reply_text("Usage: /poll \"Question\" \"Option 1\" \"Option 2\" ...")
+            return
+            
+        question = args[0]
+        options = args[1:]
+        
+        if not CHANNEL_ID:
+            await update.message.reply_text("CHANNEL_ID is not configured.")
+            return
+            
+        await context.bot.send_poll(
+            chat_id=CHANNEL_ID,
+            question=question,
+            options=options,
+            is_anonymous=True
+        )
+        await update.message.reply_text(f"✅ Poll sent to channel!")
+        logger.info(f"Poll sent to channel by {user_id}")
+    except ValueError:
+        await update.message.reply_text("Invalid format. Make sure to use quotes around options with spaces.")
+    except Exception as e:
+        logger.error(f"Error sending poll: {e}")
+        await update.message.reply_text(f"Error sending poll: {e}")
 
 # ============ SCHEDULED POSTING ============
 
@@ -293,6 +390,8 @@ def main():
     application.add_handler(CommandHandler("medium", medium))
     application.add_handler(CommandHandler("ask", ask_command))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("questions", questions_command))
+    application.add_handler(CommandHandler("poll", poll_command))
     
     # Message handler (for Q&A)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
