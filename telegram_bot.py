@@ -10,6 +10,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ChatAction
+import httpx
 
 # Configure logging
 logging.basicConfig(
@@ -24,6 +25,7 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 GROUP_ID = os.getenv("GROUP_ID")
 ADMIN_ID = os.getenv("ADMIN_ID")
 FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS")
+XAI_API_KEY = os.getenv("XAI_API_KEY")
 
 # Initialize Firebase
 db = None
@@ -176,6 +178,51 @@ async def get_medium_latest(return_url_only=False):
     if return_url_only: return None
     return None, None
 
+async def get_grok_response(user_message: str) -> str:
+    """Get dynamic response from xAI's Grok API"""
+    if not XAI_API_KEY:
+        return None
+        
+    system_prompt = f"""
+You are the official Telegram assistant for Bearded Bangali, a tech and lifestyle content creator.
+Your job is to answer questions enthusiastically and politely using the following context.
+Do not invent facts about him. Keep answers concise (1-3 sentences max).
+
+Current known FAQs/Facts:
+{json.dumps(FAQ, indent=2)}
+
+Social Media Links:
+- YouTube: {YOUTUBE_LINK}
+- Medium: {MEDIUM_LINK}
+- Instagram: {INSTAGRAM_LINK}
+- X/Twitter: {TWITTER_LINK}
+- Facebook: {FACEBOOK_LINK}
+"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                "https://api.x.ai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {XAI_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "messages": [
+                        {"role": "system", "content": system_prompt.strip()},
+                        {"role": "user", "content": user_message}
+                    ],
+                    "model": "grok-beta",
+                    "stream": False,
+                    "temperature": 0.7
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.error(f"Error calling Grok API: {e}")
+        return None
+
 def get_faq_response(user_message: str) -> str:
     """Match user question to FAQ"""
     user_message_lower = user_message.lower()
@@ -293,7 +340,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Firebase error: {e}")
 
-    response = get_faq_response(user_message)
+    await update.message.chat.send_action(ChatAction.TYPING)
+
+    response = await get_grok_response(user_message)
+    if not response:
+        response = get_faq_response(user_message)
+
     await update.message.reply_text(response, parse_mode="HTML")
     logger.info(f"Answered question from {user_id}: {user_message[:50]}")
 
