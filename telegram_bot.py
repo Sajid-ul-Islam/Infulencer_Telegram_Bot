@@ -2,7 +2,7 @@ import os
 import logging
 import shlex
 import json
-from datetime import datetime
+from datetime import datetime, time
 import feedparser
 import requests
 from telegram import Update
@@ -400,13 +400,13 @@ def main():
     job_queue = application.job_queue
     
     # Post latest YouTube daily at 9 AM
-    job_queue.run_daily(auto_post_youtube, time=(9, 0), days=(0, 1, 2, 3, 4, 5, 6))
+    job_queue.run_daily(auto_post_youtube, time=time(9, 0), days=(0, 1, 2, 3, 4, 5, 6))
     
     # Post latest Medium daily at 6 PM
-    job_queue.run_daily(auto_post_medium, time=(18, 0), days=(0, 1, 2, 3, 4, 5, 6))
+    job_queue.run_daily(auto_post_medium, time=time(18, 0), days=(0, 1, 2, 3, 4, 5, 6))
     
     # Post greeting daily at 8 AM
-    job_queue.run_daily(greeting_post, time=(8, 0), days=(0, 1, 2, 3, 4, 5, 6))
+    job_queue.run_daily(greeting_post, time=time(8, 0), days=(0, 1, 2, 3, 4, 5, 6))
     
     logger.info("Bot started successfully!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
