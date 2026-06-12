@@ -2,6 +2,7 @@ import os
 import logging
 import shlex
 import json
+import html
 from datetime import datetime, time
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -145,7 +146,8 @@ async def get_youtube_posts(limit=3, return_url_only=False):
 
             message = "🎥 <b>Latest Videos:</b>\n\n"
             for i, entry in enumerate(feed.entries[:limit]):
-                message += f"{i+1}. <b>{entry.title}</b>\n<a href='{entry.link}'>Watch Now</a>\n\n"
+                safe_title = html.escape(entry.title)
+                message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>Watch Now</a>\n\n"
             
             button = InlineKeyboardButton("View Channel 📺", url=YOUTUBE_LINK)
             return message.strip(), button, feed.entries[0].link
@@ -167,7 +169,8 @@ async def get_medium_posts(limit=3, return_url_only=False):
 
             message = "📝 <b>Latest Articles:</b>\n\n"
             for i, entry in enumerate(feed.entries[:limit]):
-                message += f"{i+1}. <b>{entry.title}</b>\n<a href='{entry.link}'>Read Now</a>\n\n"
+                safe_title = html.escape(entry.title)
+                message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>Read Now</a>\n\n"
             
             button = InlineKeyboardButton("View Profile 📝", url=MEDIUM_LINK)
             return message.strip(), button, feed.entries[0].link
