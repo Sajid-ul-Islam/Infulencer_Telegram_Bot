@@ -4,7 +4,7 @@ from telegram.constants import ChatAction
 from firebase_admin import firestore
 from bot.config import logger, is_admin
 from bot.database import db
-from bot.ai import get_grok_response, get_faq_response
+from bot.ai import get_ai_response, get_faq_response
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
@@ -53,7 +53,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     if should_use_ai:
         await update.message.chat.send_action(ChatAction.TYPING)
-        response = await get_grok_response(user_message)
+        response = await get_ai_response(user_message)
         if not response:
             response = get_faq_response(user_message)
             if not response:

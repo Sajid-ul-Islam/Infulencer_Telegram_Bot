@@ -3,7 +3,7 @@ from telegram.ext import ContextTypes
 from telegram.constants import ChatAction
 from bot.config import YOUTUBE_LINK, MEDIUM_LINK, INSTAGRAM_LINK, TWITTER_LINK, FACEBOOK_LINK
 from bot.rss import get_youtube_posts, get_medium_posts
-from bot.ai import get_grok_response
+from bot.ai import get_ai_response
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = f"""
@@ -84,7 +84,7 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     await update.message.chat.send_action(ChatAction.TYPING)
-    response = await get_grok_response(query)
+    response = await get_ai_response(query)
     if not response:
         response = "I'm having trouble thinking right now. Please try again later!"
         
