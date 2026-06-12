@@ -7,7 +7,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import feedparser
 import requests
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 import firebase_admin
 from firebase_admin import credentials, firestore
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -117,7 +117,7 @@ def is_admin(user_id: str) -> bool:
         return False
     return str(user_id) == str(ADMIN_ID)
 
-async def send_channel_message(context: ContextTypes.DEFAULT_TYPE, text: str):
+async def send_channel_message(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
     """Send message to your channel"""
     if not CHANNEL_ID:
         logger.warning("CHANNEL_ID not set. Skipping channel broadcast.")
@@ -126,67 +126,56 @@ async def send_channel_message(context: ContextTypes.DEFAULT_TYPE, text: str):
         await context.bot.send_message(
             chat_id=CHANNEL_ID,
             text=text,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=reply_markup
         )
         logger.info(f"Message sent to channel: {text[:50]}")
     except Exception as e:
         logger.error(f"Error sending to channel: {e}")
 
-async def get_youtube_latest(return_url_only=False):
-    """Fetch latest YouTube video"""
+async def get_youtube_posts(limit=3, return_url_only=False):
+    """Fetch latest YouTube videos"""
     try:
         rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={YOUTUBE_CHANNEL_ID}"
         feed = feedparser.parse(rss_url)
         
         if feed.entries:
-            latest = feed.entries[0]
-            title = latest.title
-            link = latest.link
-            
             if return_url_only:
-                return link
+                return feed.entries[0].link
 
-            message = f"""
-🎥 <b>New Video!</b>
-
-<b>{title}</b>
-
-<a href="{link}">Watch Now</a>
-            """
-            return message.strip(), link
+            message = "🎥 <b>Latest Videos:</b>\n\n"
+            for i, entry in enumerate(feed.entries[:limit]):
+                message += f"{i+1}. <b>{entry.title}</b>\n<a href='{entry.link}'>Watch Now</a>\n\n"
+            
+            button = InlineKeyboardButton("View Channel 📺", url=YOUTUBE_LINK)
+            return message.strip(), button, feed.entries[0].link
     except Exception as e:
         logger.error(f"Error fetching YouTube: {e}")
     
     if return_url_only: return None
-    return None, None
+    return None, None, None
 
-async def get_medium_latest(return_url_only=False):
-    """Fetch latest Medium article"""
+async def get_medium_posts(limit=3, return_url_only=False):
+    """Fetch latest Medium articles"""
     try:
         rss_url = f"https://medium.com/feed/@{MEDIUM_USERNAME}"
         feed = feedparser.parse(rss_url)
         
         if feed.entries:
-            latest = feed.entries[0]
-            title = latest.title
-            link = latest.link
-            
             if return_url_only:
-                return link
+                return feed.entries[0].link
 
-            message = f"""
-📝 <b>New Article!</b>
-
-<b>{title}</b>
-
-<a href="{link}">Read Now</a>
-            """
-            return message.strip(), link
+            message = "📝 <b>Latest Articles:</b>\n\n"
+            for i, entry in enumerate(feed.entries[:limit]):
+                message += f"{i+1}. <b>{entry.title}</b>\n<a href='{entry.link}'>Read Now</a>\n\n"
+            
+            button = InlineKeyboardButton("View Profile 📝", url=MEDIUM_LINK)
+            return message.strip(), button, feed.entries[0].link
     except Exception as e:
         logger.error(f"Error fetching Medium: {e}")
     
     if return_url_only: return None
-    return None, None
+    return None, None, None
 
 def search_knowledge_base(query: str) -> str:
     """Mock vector search using basic keyword matching"""
@@ -371,31 +360,39 @@ async def socials_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def latest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action(ChatAction.TYPING)
     message = "🔄 <b>Fetching latest content...</b>\n\n"
+    buttons = []
     
-    yt_msg, _ = await get_youtube_latest()
-    if yt_msg: message += yt_msg + "\n\n"
+    yt_msg, yt_btn, _ = await get_youtube_posts(limit=2)
+    if yt_msg: 
+        message += yt_msg + "\n\n"
+        if yt_btn: buttons.append([yt_btn])
     
-    med_msg, _ = await get_medium_latest()
-    if med_msg: message += med_msg + "\n\n"
+    med_msg, med_btn, _ = await get_medium_posts(limit=2)
+    if med_msg: 
+        message += med_msg + "\n\n"
+        if med_btn: buttons.append([med_btn])
     
     if yt_msg or med_msg:
-        await update.message.reply_text(message, parse_mode="HTML")
+        reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
+        await update.message.reply_text(message, parse_mode="HTML", reply_markup=reply_markup)
     else:
         await update.message.reply_text("Currently no new content. Check back soon! 📌", parse_mode="HTML")
 
 async def youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action(ChatAction.TYPING)
-    yt_msg, _ = await get_youtube_latest()
+    yt_msg, yt_btn, _ = await get_youtube_posts(limit=3)
     if yt_msg:
-        await update.message.reply_text(yt_msg, parse_mode="HTML")
+        reply_markup = InlineKeyboardMarkup([[yt_btn]]) if yt_btn else None
+        await update.message.reply_text(yt_msg, parse_mode="HTML", reply_markup=reply_markup)
     else:
         await update.message.reply_text(f"No videos yet. Subscribe here: {YOUTUBE_LINK}", parse_mode="HTML")
 
 async def medium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action(ChatAction.TYPING)
-    med_msg, _ = await get_medium_latest()
+    med_msg, med_btn, _ = await get_medium_posts(limit=3)
     if med_msg:
-        await update.message.reply_text(med_msg, parse_mode="HTML")
+        reply_markup = InlineKeyboardMarkup([[med_btn]]) if med_btn else None
+        await update.message.reply_text(med_msg, parse_mode="HTML", reply_markup=reply_markup)
     else:
         await update.message.reply_text(f"No articles yet. Follow me on Medium: {MEDIUM_LINK}", parse_mode="HTML")
 
@@ -585,9 +582,10 @@ async def listfaq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def auto_post_youtube(context: ContextTypes.DEFAULT_TYPE):
     global last_posted_youtube_url
     try:
-        yt_msg, link = await get_youtube_latest()
+        yt_msg, yt_btn, link = await get_youtube_posts(limit=1)
         if yt_msg and link and link != last_posted_youtube_url:
-            await send_channel_message(context, yt_msg)
+            reply_markup = InlineKeyboardMarkup([[yt_btn]]) if yt_btn else None
+            await send_channel_message(context, yt_msg, reply_markup=reply_markup)
             last_posted_youtube_url = link
     except Exception as e:
         logger.error(f"Error in auto_post_youtube: {e}")
@@ -595,9 +593,10 @@ async def auto_post_youtube(context: ContextTypes.DEFAULT_TYPE):
 async def auto_post_medium(context: ContextTypes.DEFAULT_TYPE):
     global last_posted_medium_url
     try:
-        med_msg, link = await get_medium_latest()
+        med_msg, med_btn, link = await get_medium_posts(limit=1)
         if med_msg and link and link != last_posted_medium_url:
-            await send_channel_message(context, med_msg)
+            reply_markup = InlineKeyboardMarkup([[med_btn]]) if med_btn else None
+            await send_channel_message(context, med_msg, reply_markup=reply_markup)
             last_posted_medium_url = link
     except Exception as e:
         logger.error(f"Error in auto_post_medium: {e}")
