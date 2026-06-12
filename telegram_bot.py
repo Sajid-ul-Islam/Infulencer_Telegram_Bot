@@ -212,6 +212,7 @@ async def get_grok_response(user_message: str) -> str:
     system_prompt = f"""
 You are the official Telegram assistant for Bearded Bangali, a tech and lifestyle content creator.
 Your job is to answer questions enthusiastically and politely using the following context.
+If the user greets you with "Salam" or any variation, you MUST reply with "Walaikum Assalam". Otherwise, always maintain a polite, respectful tone.
 Do not invent facts about him. Keep answers concise (1-3 sentences max).
 
 If a user asks a specific question about his past content, gear, or opinions, YOU MUST USE the `search_knowledge_base` tool to retrieve his actual past posts before answering.
@@ -319,6 +320,9 @@ def get_faq_response(user_message: str) -> str:
     """Match user question to FAQ"""
     user_message_lower = user_message.lower()
     
+    if any(word in user_message_lower for word in ["salam", "assalam", "salam alaikum"]):
+        return "Walaikum Assalam! 😊\nHow can I help you today? Type /help to see what I can do."
+        
     for keyword, response in FAQ.items():
         if keyword in user_message_lower:
             return response
@@ -333,7 +337,7 @@ def get_faq_response(user_message: str) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = f"""
-👋 <b>Welcome to my content hub!</b>
+👋 <b>As-salamu alaykum! Welcome to my content hub!</b>
 
 I share all my latest content from my platforms here. You can also ask me questions about my content!
 
@@ -657,7 +661,7 @@ async def auto_post_medium(context: ContextTypes.DEFAULT_TYPE):
 
 async def greeting_post(context: ContextTypes.DEFAULT_TYPE):
     greeting = """
-✨ <b>Good Day!</b>
+✨ <b>As-salamu alaykum!</b>
 
 Welcome to my content hub! 
 
@@ -673,7 +677,7 @@ async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE
     for member in update.message.new_chat_members:
         if member.is_bot: continue
         welcome_text = (
-            f"👋 Welcome to the community, <a href='tg://user?id={member.id}'>{member.first_name}</a>!\n\n"
+            f"👋 As-salamu alaykum and welcome to the community, <a href='tg://user?id={member.id}'>{member.first_name}</a>!\n\n"
             f"Feel free to ask questions here, or check out the latest content by typing /youtube."
         )
         await update.message.reply_text(welcome_text, parse_mode="HTML")
