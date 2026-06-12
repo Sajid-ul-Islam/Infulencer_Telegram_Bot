@@ -7,7 +7,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import feedparser
 import requests
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ChatPermissions
 import firebase_admin
 from firebase_admin import credentials, firestore
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -426,6 +426,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
     
+    # 🛡️ Anti-Spam Link Protection for Groups
+    if update.message.chat.type in ["group", "supergroup"]:
+        if ("http://" in user_message.lower() or "https://" in user_message.lower()) and not is_admin(user_id):
+            try:
+                await update.message.delete()
+                await context.bot.send_message(
+                    chat_id=update.message.chat_id,
+                    text=f"⚠️ @{username}, external links are not allowed in this group!"
+                )
+                return
+            except Exception as e:
+                logger.error(f"Could not delete spam message: {e}")
+
     if db:
         try:
             db.collection("questions").add({
@@ -447,6 +460,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Answered question from {user_id}: {user_message[:50]}")
 
 # ============ ADMIN COMMANDS ============
+
+async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    
+    if not update.message.reply_to_message:
+        await update.message.reply_text("You must reply to the user's message to ban them.")
+        return
+        
+    target_user_id = update.message.reply_to_message.from_user.id
+    target_username = update.message.reply_to_message.from_user.first_name
+    
+    try:
+        await context.bot.ban_chat_member(chat_id=update.message.chat_id, user_id=target_user_id)
+        await update.message.reply_text(f"🔨 {target_username} has been permanently banned from the group.")
+    except Exception as e:
+        await update.message.reply_text(f"Failed to ban user: {e}")
+
+async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    
+    if not update.message.reply_to_message:
+        await update.message.reply_text("You must reply to the user's message to mute them.")
+        return
+        
+    target_user_id = update.message.reply_to_message.from_user.id
+    target_username = update.message.reply_to_message.from_user.first_name
+    
+    try:
+        await context.bot.restrict_chat_member(
+            chat_id=update.message.chat_id, 
+            user_id=target_user_id,
+            permissions=ChatPermissions(can_send_messages=False)
+        )
+        await update.message.reply_text(f"🔇 {target_username} has been muted and can no longer send messages.")
+    except Exception as e:
+        await update.message.reply_text(f"Failed to mute user: {e}")
 
 async def postlatest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -613,6 +664,17 @@ Find all my latest updates here. Got a question? Just DM the bot!
     """
     await send_channel_message(context, greeting)
 
+# ============ EVENT HANDLERS ============
+
+async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    for member in update.message.new_chat_members:
+        if member.is_bot: continue
+        welcome_text = (
+            f"👋 Welcome to the community, <a href='tg://user?id={member.id}'>{member.first_name}</a>!\n\n"
+            f"Feel free to ask questions here, or check out the latest content by typing /youtube."
+        )
+        await update.message.reply_text(welcome_text, parse_mode="HTML")
+
 # ============ MAIN APPLICATION ============
 
 async def post_init(application: Application):
@@ -663,6 +725,8 @@ def main():
     
     # Admin commands
     application.add_handler(CommandHandler("postlatest", postlatest_command))
+    application.add_handler(CommandHandler("ban", ban_command))
+    application.add_handler(CommandHandler("mute", mute_command))
     application.add_handler(CommandHandler("questions", questions_command))
     application.add_handler(CommandHandler("poll", poll_command))
     application.add_handler(CommandHandler("broadcast", broadcast_command))
@@ -670,7 +734,8 @@ def main():
     application.add_handler(CommandHandler("rmfaq", rmfaq_command))
     application.add_handler(CommandHandler("listfaq", listfaq_command))
     
-    # Message handler
+    # Message handlers
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Scheduled jobs
