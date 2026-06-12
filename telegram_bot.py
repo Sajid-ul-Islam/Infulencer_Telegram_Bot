@@ -3,8 +3,9 @@ import logging
 import shlex
 import json
 import html
-from datetime import datetime, time
+import datetime
 import threading
+from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import feedparser
 import requests
@@ -31,6 +32,11 @@ GROUP_ID = os.getenv("GROUP_ID")
 ADMIN_ID = os.getenv("ADMIN_ID")
 FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS")
 XAI_API_KEY = os.getenv("XAI_API_KEY")
+TIMEZONE_STR = os.getenv("TIMEZONE", "UTC")
+try:
+    BOT_TZ = ZoneInfo(TIMEZONE_STR)
+except Exception:
+    BOT_TZ = datetime.timezone.utc
 
 # Initialize Firebase
 db = None
@@ -140,8 +146,10 @@ async def get_youtube_posts(limit=3, return_url_only=False):
     """Fetch latest YouTube videos"""
     try:
         rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={YOUTUBE_CHANNEL_ID}"
-        feed = feedparser.parse(rss_url)
-        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(rss_url)
+            feed = feedparser.parse(response.content)
+            
         if feed.entries:
             if return_url_only:
                 return feed.entries[0].link
@@ -163,8 +171,10 @@ async def get_medium_posts(limit=3, return_url_only=False):
     """Fetch latest Medium articles"""
     try:
         rss_url = f"https://medium.com/feed/@{MEDIUM_USERNAME}"
-        feed = feedparser.parse(rss_url)
-        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(rss_url)
+            feed = feedparser.parse(response.content)
+            
         if feed.entries:
             if return_url_only:
                 return feed.entries[0].link
@@ -967,9 +977,9 @@ def main():
     
     # Scheduled jobs
     job_queue = application.job_queue
-    job_queue.run_daily(auto_post_youtube, time=time(9, 0), days=(0, 1, 2, 3, 4, 5, 6))
-    job_queue.run_daily(auto_post_medium, time=time(18, 0), days=(0, 1, 2, 3, 4, 5, 6))
-    job_queue.run_daily(greeting_post, time=time(8, 0), days=(0, 1, 2, 3, 4, 5, 6))
+    job_queue.run_daily(auto_post_youtube, time=datetime.time(9, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
+    job_queue.run_daily(auto_post_medium, time=datetime.time(18, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
+    job_queue.run_daily(greeting_post, time=datetime.time(8, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
     
     logger.info("Bot started successfully!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
