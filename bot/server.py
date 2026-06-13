@@ -5,6 +5,7 @@ import logging
 import threading
 import requests
 import collections
+import asyncio
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -14,6 +15,7 @@ from bot.config import (
     DASHBOARD_PASSWORD,
     TELEGRAM_TOKEN,
     CHANNEL_ID,
+    GROUP_ID,
     YOUTUBE_LINK,
     MEDIUM_LINK,
     SUBSTACK_URL,
@@ -25,6 +27,9 @@ from bot.database import FAQ, save_faq, remove_faq, db
 
 # Global start time for uptime calculation
 START_TIME = time.time()
+
+# Store keep-alive ping stats (up to 5 recent pings)
+ping_history = collections.deque(maxlen=5)
 
 # Custom Log Handler to keep logs in memory
 class MemoryLogHandler(logging.Handler):
@@ -50,20 +55,91 @@ memory_log_handler = MemoryLogHandler()
 memory_log_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logging.getLogger().addHandler(memory_log_handler)
 
+# Helper to run async functions in synchronous threads
+def run_async(coro):
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
+
 def ping_self():
-    """Pings the bot's own Render URL every 10 minutes to prevent sleeping."""
+    """Pings the bot's own Render URL every 10 minutes to prevent sleeping and tracks latency."""
     url = os.getenv("RENDER_EXTERNAL_URL")
     if not url:
-        logger.warning("RENDER_EXTERNAL_URL not set. Self-ping will not work.")
+        logger.warning("RENDER_EXTERNAL_URL not set. Self-ping latency tracking is disabled.")
         return
         
     while True:
         try:
             time.sleep(600)  # Sleep 10 minutes
-            response = requests.get(url)
-            logger.info(f"Self-ping executed: Status {response.status_code}")
+            start_ping = time.time()
+            response = requests.get(url, timeout=10)
+            latency = int((time.time() - start_ping) * 1000)
+            
+            ping_entry = {
+                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                "status": response.status_code,
+                "latency": latency
+            }
+            ping_history.append(ping_entry)
+            logger.info(f"Self-ping executed: Status {response.status_code} ({latency}ms)")
         except Exception as e:
             logger.error(f"Self-ping failed: {e}")
+
+def check_and_sync_rss_manually():
+    """Manually fetches latest YouTube, Medium, and Substack entries and broadcasts to channel if new."""
+    import bot.jobs
+    from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
+
+    def send_tg_message(text, reply_markup=None):
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": CHANNEL_ID, "text": text, "parse_mode": "HTML"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        res = requests.post(url, json=payload, timeout=10)
+        return res.status_code == 200
+
+    posts_sent = 0
+
+    # Sync YouTube
+    try:
+        yt_msg, yt_btn, link = run_async(get_youtube_posts(limit=1))
+        if yt_msg and link and link != bot.jobs.last_posted_youtube_url:
+            reply_markup = {"inline_keyboard": [[{"text": yt_btn.text, "url": yt_btn.url}]]} if yt_btn else None
+            if send_tg_message(yt_msg, reply_markup):
+                bot.jobs.last_posted_youtube_url = link
+                posts_sent += 1
+                logger.info(f"Manual Sync: Posted YouTube video: {link}")
+    except Exception as e:
+        logger.error(f"Error manually syncing YouTube: {e}")
+
+    # Sync Medium
+    try:
+        med_msg, med_btn, link = run_async(get_medium_posts(limit=1))
+        if med_msg and link and link != bot.jobs.last_posted_medium_url:
+            reply_markup = {"inline_keyboard": [[{"text": med_btn.text, "url": med_btn.url}]]} if med_btn else None
+            if send_tg_message(med_msg, reply_markup):
+                bot.jobs.last_posted_medium_url = link
+                posts_sent += 1
+                logger.info(f"Manual Sync: Posted Medium article: {link}")
+    except Exception as e:
+        logger.error(f"Error manually syncing Medium: {e}")
+
+    # Sync Substack
+    try:
+        sub_msg, sub_btn, link = run_async(get_substack_posts(limit=1))
+        if sub_msg and link and link != bot.jobs.last_posted_substack_url:
+            reply_markup = {"inline_keyboard": [[{"text": sub_btn.text, "url": sub_btn.url}]]} if sub_btn else None
+            if send_tg_message(sub_msg, reply_markup):
+                bot.jobs.last_posted_substack_url = link
+                posts_sent += 1
+                logger.info(f"Manual Sync: Posted Substack newsletter: {link}")
+    except Exception as e:
+        logger.error(f"Error manually syncing Substack: {e}")
+
+    return posts_sent
 
 # Premium HTML/CSS/JS single page dashboard design for BB Bot HUB
 DASHBOARD_HTML = """<!DOCTYPE html>
@@ -325,8 +401,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         /* Stats Grid */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 20px;
             margin-bottom: 32px;
         }
 
@@ -371,6 +447,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .stat-desc {
             font-size: 12px;
             color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         /* Content Layout */
@@ -492,8 +571,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         .icon-btn:hover {
-            background-color: rgba(239, 68, 68, 0.1);
-            color: var(--error);
+            background-color: rgba(255, 255, 255, 0.05);
         }
 
         .no-data {
@@ -606,14 +684,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             to { transform: translateY(0); opacity: 1; }
         }
 
-        /* Winner Modal */
+        /* Modals style */
         .modal-overlay {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.8);
+            background-color: rgba(0, 0, 0, 0.85);
             display: none;
             align-items: center;
             justify-content: center;
@@ -640,7 +718,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             left: 0;
             width: 100%;
             height: 6px;
-            background: linear-gradient(90deg, var(--success), var(--purple));
+            background: linear-gradient(90deg, var(--primary), var(--purple));
         }
 
         .winner-crown {
@@ -724,6 +802,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 The winner has been announced automatically in the Telegram channel.
             </p>
             <button onclick="closeWinnerModal()" class="btn btn-secondary" style="margin-top: 10px;">Dismiss</button>
+        </div>
+    </div>
+
+    <!-- User Click Breakdown Details Modal -->
+    <div id="user-modal" class="modal-overlay" onclick="closeUserModal()">
+        <div class="modal-content glass" style="width: 450px; text-align: left; align-items: stretch;" onclick="event.stopPropagation()">
+            <h2 id="user-modal-title" style="font-size: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 16px;">User Activity Details</h2>
+            <div style="display: flex; flex-direction: column; gap: 12px; font-size: 15px;">
+                <div><strong>Username:</strong> <span id="user-modal-name">Unknown</span></div>
+                <div><strong>User ID:</strong> <span id="user-modal-id">N/A</span></div>
+                <div><strong>Last Active:</strong> <span id="user-modal-active">N/A</span></div>
+                <div style="margin-top: 16px;">
+                    <strong style="color: var(--primary);">Command Click Breakdown:</strong>
+                    <div id="user-modal-commands" style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
+                        <!-- Dynamic Command rows -->
+                    </div>
+                </div>
+            </div>
+            <button onclick="closeUserModal()" class="btn btn-secondary" style="margin-top: 24px; align-self: flex-end;">Close</button>
         </div>
     </div>
 
@@ -813,11 +910,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
                 <div class="stat-card glass">
                     <div class="stat-header">
+                        <span>Keep-Alive Status</span>
+                        <div id="heartbeat-pulse" class="status-dot" style="background-color: var(--text-secondary); box-shadow: none;"></div>
+                    </div>
+                    <div class="stat-value" id="stat-heartbeat" style="font-size: 22px; margin-top: 8px;">No Data</div>
+                    <div class="stat-desc" id="stat-heartbeat-desc">Ping latency history</div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-header">
                         <span>Custom FAQs</span>
                         <svg viewBox="0 0 24 24" class="stat-icon" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
                     </div>
                     <div class="stat-value" id="stat-faqs">0</div>
-                    <div class="stat-desc">Locally cached and active FAQ patterns</div>
+                    <div class="stat-desc">Locally cached FAQ patterns</div>
                 </div>
                 <div class="stat-card glass">
                     <div class="stat-header">
@@ -825,7 +930,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <svg viewBox="0 0 24 24" class="stat-icon" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path></svg>
                     </div>
                     <div class="stat-value" id="stat-questions">0</div>
-                    <div class="stat-desc">Total user questions recorded in database</div>
+                    <div class="stat-desc">Total user questions in database</div>
                 </div>
                 <div class="stat-card glass">
                     <div class="stat-header">
@@ -833,15 +938,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <svg viewBox="0 0 24 24" class="stat-icon" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                     </div>
                     <div class="stat-value" id="stat-suggestions">0</div>
-                    <div class="stat-desc">User suggested video & article topics</div>
-                </div>
-                <div class="stat-card glass">
-                    <div class="stat-header">
-                        <span>Giveaway Entries</span>
-                        <svg viewBox="0 0 24 24" class="stat-icon" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;"><rect x="2" y="7" width="20" height="5"></rect><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"></path></svg>
-                    </div>
-                    <div class="stat-value" id="stat-giveaway">0</div>
-                    <div class="stat-desc">Active registrations for current prize</div>
+                    <div class="stat-desc">User suggested video topics</div>
                 </div>
             </div>
 
@@ -855,7 +952,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
                         <button onclick="switchTab('analytics')" class="btn btn-secondary">Open User Analytics</button>
                         <button onclick="switchTab('faqs')" class="btn btn-secondary">Manage FAQ Database</button>
-                        <button onclick="switchTab('broadcast')" class="btn btn-secondary">Send Channel Broadcast</button>
+                        <button onclick="syncRSS()" id="rss-sync-btn" class="btn btn-secondary">Sync Content Platforms</button>
                         <button onclick="switchTab('giveaways')" class="btn btn-secondary">Draw Giveaway Winner</button>
                     </div>
                 </div>
@@ -894,15 +991,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
                 
                 <div class="card glass">
-                    <div class="card-title">👥 Top Active Users</div>
-                    <div class="table-container" style="max-height: 280px; overflow-y: auto;">
+                    <div class="card-title">👥 Active User Moderation (Click Row to View Clicks)</div>
+                    <div class="table-container" style="max-height: 300px; overflow-y: auto;">
                         <table>
                             <thead>
                                 <tr>
                                     <th>User</th>
                                     <th>ID</th>
                                     <th>Clicks</th>
-                                    <th>Last Active</th>
+                                    <th class="action-cell">Moderation Controls</th>
                                 </tr>
                             </thead>
                             <tbody id="analytics-users-body">
@@ -951,7 +1048,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 <tr>
                                     <th>Keyword</th>
                                     <th>Response Preview</th>
-                                    <th class="action-cell">Action</th>
+                                    <th class="action-cell">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="faq-table-body">
@@ -964,7 +1061,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
 
                 <div class="card glass">
-                    <div class="card-title">➕ Add Custom FAQ</div>
+                    <div class="card-title" id="faq-editor-title">➕ Add Custom FAQ</div>
                     <form id="add-faq-form" style="display: flex; flex-direction: column; gap: 16px;">
                         <div class="form-group">
                             <label for="faq-keyword">Trigger Keyword / Phrase</label>
@@ -1104,7 +1201,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="console-header">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <div style="width: 10px; height: 10px; border-radius: 50%; background-color: var(--primary);"></div>
-                    <span style="font-weight: 600; font-size: 14px;">InfluencerBot Console</span>
+                    <span style="font-weight: 600; font-size: 14px;">BB Bot HUB Console</span>
                 </div>
                 <button onclick="copyLogs()" class="btn btn-secondary" style="padding: 6px 12px; font-size: 13px;">Copy Session Logs</button>
             </div>
@@ -1137,10 +1234,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             });
             document.getElementById(`tab-${tabId}`).classList.add('active');
             
-            // Set header title
             pageTitle.innerText = tabId.charAt(0).toUpperCase() + tabId.slice(1);
             
-            // Trigger target load
             if (tabId === 'faqs') refreshFAQs();
             if (tabId === 'suggestions') refreshSuggestions();
             if (tabId === 'questions') refreshQuestions();
@@ -1194,7 +1289,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             stopPoller();
         });
 
-        // Initialize login check
         window.addEventListener('DOMContentLoaded', () => {
             const savedPassword = localStorage.getItem('dashboard_password');
             if (savedPassword) {
@@ -1222,7 +1316,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             try {
                 const response = await fetch(endpoint, options);
                 if (response.status === 401) {
-                    // Unauthorized - kick to login
                     localStorage.removeItem('dashboard_password');
                     loginOverlay.style.display = 'flex';
                     showToast('Session expired or invalid token', 'error');
@@ -1236,7 +1329,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        // Toast display utility
         function showToast(message, type = 'success') {
             const toast = document.getElementById('toast');
             toast.innerText = (type === 'success' ? '✅ ' : '❌ ') + message;
@@ -1248,7 +1340,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }, 3000);
         }
 
-        // Refresh stats
+        // Refresh stats (including latency heartbeat)
         async function refreshStats() {
             const data = await fetchAPI('/api/stats');
             if (!data) return;
@@ -1260,9 +1352,51 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('stat-giveaway').innerText = data.giveaway_count;
             document.getElementById('giveaway-active-entries').innerText = data.giveaway_count;
 
+            // Heartbeat monitor update
+            const heartbeatVal = document.getElementById('stat-heartbeat');
+            const heartbeatPulse = document.getElementById('heartbeat-pulse');
+            const heartbeatDesc = document.getElementById('stat-heartbeat-desc');
+
+            if (data.ping_history && data.ping_history.length > 0) {
+                const lastPing = data.ping_history[data.ping_history.length - 1];
+                heartbeatVal.innerText = `${lastPing.latency} ms`;
+                heartbeatVal.style.color = lastPing.status === 200 ? 'var(--success)' : 'var(--error)';
+                
+                heartbeatPulse.style.backgroundColor = lastPing.status === 200 ? 'var(--success)' : 'var(--error)';
+                heartbeatPulse.style.boxShadow = lastPing.status === 200 ? '0 0 10px var(--success-glow)' : '0 0 10px rgba(239, 68, 68, 0.4)';
+                
+                // Construct log history tooltip
+                const pingsList = data.ping_history.slice().reverse().map(p => `${p.timestamp}: ${p.status} (${p.latency}ms)`).join(' | ');
+                heartbeatDesc.innerText = pingsList;
+            } else {
+                heartbeatVal.innerText = 'No Pings';
+                heartbeatVal.style.color = 'var(--text-secondary)';
+                heartbeatPulse.style.backgroundColor = 'var(--text-secondary)';
+                heartbeatPulse.style.boxShadow = 'none';
+                heartbeatDesc.innerText = 'Self-ping pinger active';
+            }
+
             document.getElementById('channel-id-text').innerText = data.channel_id || 'Not Set';
             if (data.channel_id) {
                 document.getElementById('channel-link-display').href = `https://t.me/${data.channel_id.replace('-100', '')}`;
+            }
+        }
+
+        // Manual RSS sync action
+        async function syncRSS() {
+            const syncBtn = document.getElementById('rss-sync-btn');
+            syncBtn.disabled = true;
+            syncBtn.innerText = 'Checking feeds...';
+            
+            const res = await fetchAPI('/api/rss/sync', 'POST');
+            syncBtn.disabled = false;
+            syncBtn.innerText = 'Sync Content Platforms';
+            
+            if (res && res.status === 'success') {
+                showToast(`Manual Sync Complete! Sent ${res.posts_sent} update posts.`, 'success');
+                refreshStats();
+            } else if (res && res.error) {
+                showToast(res.error, 'error');
             }
         }
 
@@ -1288,7 +1422,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 });
             }
 
-            // 2. Fetch active users list
+            // 2. Fetch active users list with moderation options
             const users = await fetchAPI('/api/analytics/users');
             const usersBody = document.getElementById('analytics-users-body');
             usersBody.innerHTML = '';
@@ -1300,15 +1434,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             } else {
                 users.forEach(u => {
                     const tr = document.createElement('tr');
+                    tr.style.cursor = 'pointer';
+                    tr.onclick = () => showUserDetails(u);
                     tr.innerHTML = `
                         <td><strong>${escapeHTML(u.username)}</strong></td>
                         <td style="color: var(--text-secondary); font-size: 13px;">${escapeHTML(u.user_id)}</td>
                         <td><span style="font-weight: 700; color: var(--purple);">${escapeHTML(u.total_clicks)}</span></td>
-                        <td style="color: var(--text-secondary); font-size: 13px;">${escapeHTML(u.last_active)}</td>
+                        <td class="action-cell" onclick="event.stopPropagation()">
+                            <button class="btn btn-secondary" onclick="muteUser('${escapeJS(u.user_id)}')" style="padding: 4px 8px; font-size: 12px; font-weight: 600; margin-right: 6px;">Mute 🔇</button>
+                            <button class="btn btn-secondary" onclick="unmuteUser('${escapeJS(u.user_id)}')" style="padding: 4px 8px; font-size: 12px; font-weight: 600; color: var(--success); margin-right: 6px;">Unmute 🔊</button>
+                            <button class="btn btn-danger" onclick="banUser('${escapeJS(u.user_id)}')" style="padding: 4px 8px; font-size: 12px; font-weight: 600;">Ban 🔨</button>
+                        </td>
                     `;
                     usersBody.appendChild(tr);
 
-                    // Aggregate command counts for popularity stats
                     if (u.commands) {
                         Object.keys(u.commands).forEach(cmd => {
                             cmdPopularity[cmd] = (cmdPopularity[cmd] || 0) + u.commands[cmd];
@@ -1333,12 +1472,75 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     card.style.padding = '12px 16px';
                     card.style.textAlign = 'center';
                     card.innerHTML = `
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase;">/${escapeHTML(cmd)}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase;">/${escapeHTML(cmd)}</div>
                         <div style="font-size: 20px; font-weight: 700; color: var(--primary);">${escapeHTML(cmdPopularity[cmd])}</div>
                     `;
                     statsGrid.appendChild(card);
                 });
             }
+        }
+
+        // Moderation Operations
+        async function muteUser(userId) {
+            if (!confirm(`Mute user ID ${userId} in the configured Telegram group?`)) return;
+            const res = await fetchAPI('/api/moderation/mute', 'POST', { user_id: userId });
+            if (res && res.status === 'success') {
+                showToast(`User ${userId} has been restricted`, 'success');
+            } else if (res && res.error) {
+                showToast(res.error, 'error');
+            }
+        }
+
+        async function unmuteUser(userId) {
+            const res = await fetchAPI('/api/moderation/unmute', 'POST', { user_id: userId });
+            if (res && res.status === 'success') {
+                showToast(`User ${userId} restrictions removed`, 'success');
+            } else if (res && res.error) {
+                showToast(res.error, 'error');
+            }
+        }
+
+        async function banUser(userId) {
+            if (!confirm(`Permanently ban user ID ${userId} from the configured Telegram group?`)) return;
+            const res = await fetchAPI('/api/moderation/ban', 'POST', { user_id: userId });
+            if (res && res.status === 'success') {
+                showToast(`User ${userId} banned successfully`, 'success');
+            } else if (res && res.error) {
+                showToast(res.error, 'error');
+            }
+        }
+
+        // User Click Details Modal
+        function showUserDetails(u) {
+            document.getElementById('user-modal-name').innerText = u.username;
+            document.getElementById('user-modal-id').innerText = u.user_id;
+            document.getElementById('user-modal-active').innerText = u.last_active || 'N/A';
+            
+            const cmdList = document.getElementById('user-modal-commands');
+            cmdList.innerHTML = '';
+            
+            if (!u.commands || Object.keys(u.commands).length === 0) {
+                cmdList.innerHTML = '<div style="color: var(--text-secondary); font-style: italic;">No click telemetry logs.</div>';
+            } else {
+                Object.keys(u.commands).forEach(cmd => {
+                    const row = document.createElement('div');
+                    row.style.display = 'flex';
+                    row.style.justifyContent = 'space-between';
+                    row.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+                    row.style.padding = '6px 0';
+                    row.innerHTML = `
+                        <span style="font-family: monospace; color: var(--text-secondary);">/${escapeHTML(cmd)}</span>
+                        <strong style="color: var(--primary);">${escapeHTML(u.commands[cmd])}</strong>
+                    `;
+                    cmdList.appendChild(row);
+                });
+            }
+            
+            document.getElementById('user-modal').style.display = 'flex';
+        }
+
+        function closeUserModal() {
+            document.getElementById('user-modal').style.display = 'none';
         }
 
         // Refresh FAQ list
@@ -1367,13 +1569,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 tdKey.innerHTML = `<strong>${escapeHTML(k)}</strong>`;
                 
                 const tdVal = document.createElement('td');
-                tdVal.innerText = allFAQs[k].substring(0, 100) + (allFAQs[k].length > 100 ? '...' : '');
+                tdVal.innerText = allFAQs[k].substring(0, 80) + (allFAQs[k].length > 80 ? '...' : '');
 
                 const tdAct = document.createElement('td');
                 tdAct.className = 'action-cell';
                 tdAct.innerHTML = `
-                    <button class="icon-btn" onclick="deleteFAQ('${escapeJS(k)}')" title="Delete Trigger">
-                        <svg viewBox="0 0 24 24" style="width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2;"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    <button class="icon-btn" onclick="editFAQ('${escapeJS(k)}')" title="Edit FAQ Response" style="color: var(--primary); margin-right: 8px;">
+                        <svg viewBox="0 0 24 24" style="width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2;"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                    </button>
+                    <button class="icon-btn" onclick="deleteFAQ('${escapeJS(k)}')" title="Delete FAQ Trigger">
+                        <svg viewBox="0 0 24 24" style="width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; color: var(--error);"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                     </button>
                 `;
                 tr.appendChild(tdKey);
@@ -1383,6 +1588,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             });
         }
 
+        // Edit FAQ
+        function editFAQ(keyword) {
+            const response = allFAQs[keyword];
+            document.getElementById('faq-keyword').value = keyword;
+            document.getElementById('faq-response').value = response;
+            document.getElementById('faq-editor-title').innerText = `✏️ Edit FAQ Trigger`;
+            
+            document.getElementById('add-faq-form').scrollIntoView({ behavior: 'smooth' });
+            showToast(`Loaded "/${keyword}" for editing`, 'success');
+        }
+
         document.getElementById('faq-search').addEventListener('input', (e) => {
             renderFAQs(e.target.value);
         });
@@ -1390,13 +1606,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         // Add FAQ trigger submit
         document.getElementById('add-faq-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const keyword = document.getElementById('faq-keyword').value.trim();
+            const keyword = document.getElementById('faq-keyword').value.trim().toLowerCase();
             const response = document.getElementById('faq-response').value.trim();
             
             const res = await fetchAPI('/api/faqs', 'POST', { keyword, response });
             if (res) {
                 showToast(`Saved FAQ trigger: ${keyword}`, 'success');
                 document.getElementById('add-faq-form').reset();
+                document.getElementById('faq-editor-title').innerText = `➕ Add Custom FAQ`;
                 refreshFAQs();
                 refreshStats();
             }
@@ -1547,7 +1764,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 display.appendChild(div);
             });
             
-            // Autoscroll to bottom
             display.scrollTop = display.scrollHeight;
         }
 
@@ -1588,7 +1804,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        // Escaping utilities to prevent XSS
+        // Escaping utilities
         function escapeHTML(str) {
             if (!str) return '';
             return str.toString()
@@ -1618,7 +1834,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        # Suppress logging HTTP requests in standard console to keep logs clean
+        # Suppress logging HTTP requests in standard console
         pass
 
     def check_auth(self):
@@ -1637,7 +1853,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode('utf-8'))
 
     def do_OPTIONS(self):
-        # Handle CORS preflight request
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
@@ -1649,7 +1864,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
 
         if path == '/':
-            # Serve the dashboard HTML
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
@@ -1667,7 +1881,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
             minutes, seconds = divmod(remainder, 60)
             uptime_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-            # Safely fetch Firestore counts
             q_count, s_count, g_count = 0, 0, 0
             if db:
                 try:
@@ -1675,7 +1888,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     s_count = len(list(db.collection("suggestions").stream()))
                     g_count = len(list(db.collection("giveaway_entries").stream()))
                 except Exception as e:
-                    logger.error(f"Error fetching stats from Firestore: {e}")
+                    logger.error(f"Error fetching stats: {e}")
 
             self.send_json(200, {
                 "uptime": uptime_str,
@@ -1683,7 +1896,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "questions_count": q_count,
                 "suggestions_count": s_count,
                 "giveaway_count": g_count,
-                "channel_id": CHANNEL_ID
+                "channel_id": CHANNEL_ID,
+                "ping_history": list(ping_history)
             })
 
         elif path == '/api/faqs':
@@ -1808,6 +2022,85 @@ class DashboardHandler(BaseHTTPRequestHandler):
             save_faq(keyword, response)
             self.send_json(200, {"status": "success"})
 
+        elif path == '/api/rss/sync':
+            try:
+                posts_sent = check_and_sync_rss_manually()
+                self.send_json(200, {"status": "success", "posts_sent": posts_sent})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == '/api/moderation/ban':
+            user_id = data.get("user_id")
+            if not user_id:
+                self.send_json(400, {"error": "User ID is required"})
+                return
+            if not GROUP_ID:
+                self.send_json(400, {"error": "GROUP_ID not configured"})
+                return
+            try:
+                url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/banChatMember"
+                res = requests.post(url, json={
+                    "chat_id": GROUP_ID,
+                    "user_id": user_id
+                }, timeout=10)
+                if res.status_code == 200:
+                    self.send_json(200, {"status": "success"})
+                else:
+                    self.send_json(500, {"error": f"Telegram API error: {res.text}"})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == '/api/moderation/mute':
+            user_id = data.get("user_id")
+            if not user_id:
+                self.send_json(400, {"error": "User ID is required"})
+                return
+            if not GROUP_ID:
+                self.send_json(400, {"error": "GROUP_ID not configured"})
+                return
+            try:
+                url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/restrictChatMember"
+                res = requests.post(url, json={
+                    "chat_id": GROUP_ID,
+                    "user_id": user_id,
+                    "permissions": {"can_send_messages": False}
+                }, timeout=10)
+                if res.status_code == 200:
+                    self.send_json(200, {"status": "success"})
+                else:
+                    self.send_json(500, {"error": f"Telegram API error: {res.text}"})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == '/api/moderation/unmute':
+            user_id = data.get("user_id")
+            if not user_id:
+                self.send_json(400, {"error": "User ID is required"})
+                return
+            if not GROUP_ID:
+                self.send_json(400, {"error": "GROUP_ID not configured"})
+                return
+            try:
+                url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/restrictChatMember"
+                res = requests.post(url, json={
+                    "chat_id": GROUP_ID,
+                    "user_id": user_id,
+                    "permissions": {
+                        "can_send_messages": True,
+                        "can_send_media_messages": True,
+                        "can_send_polls": True,
+                        "can_send_other_messages": True,
+                        "can_add_web_page_previews": True,
+                        "can_invite_users": True
+                    }
+                }, timeout=10)
+                if res.status_code == 200:
+                    self.send_json(200, {"status": "success"})
+                else:
+                    self.send_json(500, {"error": f"Telegram API error: {res.text}"})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
         elif path == '/api/broadcast':
             msg = data.get("message", "").strip()
             if not msg:
@@ -1866,13 +2159,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
 
             try:
-                # Clear old entries in Firebase
                 if db:
                     docs = db.collection("giveaway_entries").stream()
                     for doc in docs:
                         doc.reference.delete()
 
-                # Send giveaway alert to Telegram with inline register button
                 message = (
                     f"🎁 <b>GIVEAWAY ALERT!</b> 🎁\n\n"
                     f"We are giving away: <b>{prize}</b>\n\n"
@@ -1946,7 +2237,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
         query = parse_qs(parsed_path.query)
 
-        # Authenticate DELETE request
         if not self.check_auth():
             self.send_json(401, {"error": "Unauthorized"})
             return
