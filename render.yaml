@@ -1,6 +1,6 @@
 services:
-  # Using 'worker' instead of 'web' because a polling Telegram bot doesn't expose a web port
-  - type: worker
+  # Using 'web' because we serve an admin dashboard alongside the polling Telegram bot
+  - type: web
     name: telegram-content-bot
     env: docker # Set to 'python' if you prefer to use the native Python environment instead of Docker
     plan: free
@@ -21,3 +21,6 @@ services:
         sync: false
       - key: FIREBASE_CREDENTIALS
         sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+

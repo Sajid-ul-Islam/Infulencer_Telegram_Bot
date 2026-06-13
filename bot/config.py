@@ -23,6 +23,8 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 TIMEZONE_STR = os.getenv("TIMEZONE", "UTC")
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "admin")
+
 
 try:
     BOT_TZ = ZoneInfo(TIMEZONE_STR)
