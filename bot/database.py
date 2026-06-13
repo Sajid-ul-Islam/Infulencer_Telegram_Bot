@@ -1,6 +1,7 @@
 import json
 import firebase_admin
 from firebase_admin import credentials, firestore
+from google.cloud import firestore as google_firestore
 from bot.config import logger, FIREBASE_CREDENTIALS, YOUTUBE_LINK, MEDIUM_LINK, INSTAGRAM_LINK, TWITTER_LINK, FACEBOOK_LINK
 
 # Initialize Firebase
@@ -60,3 +61,29 @@ def remove_faq(keyword: str):
             db.collection("faqs").document(keyword).delete()
         except Exception as e:
             logger.error(f"Error removing FAQ from Firestore: {e}")
+
+def track_activity(user_id: int, username: str, command_name: str):
+    """Log user activity to Firestore activity_logs and users aggregate stats"""
+    if not db:
+        # If database is disabled, log locally
+        logger.info(f"[Activity Log] User {username} ({user_id}): {command_name}")
+        return
+    try:
+        # 1. Log the individual event
+        db.collection("activity_logs").add({
+            "user_id": user_id,
+            "username": username,
+            "command": command_name,
+            "timestamp": google_firestore.SERVER_TIMESTAMP
+        })
+        
+        # 2. Update user aggregates in 'users' collection
+        user_ref = db.collection("users").document(str(user_id))
+        user_ref.set({
+            "username": username,
+            "last_active": google_firestore.SERVER_TIMESTAMP,
+            "total_clicks": google_firestore.Increment(1),
+            f"commands.{command_name.replace('.', '_')}": google_firestore.Increment(1)
+        }, merge=True)
+    except Exception as e:
+        logger.error(f"Error logging activity: {e}")

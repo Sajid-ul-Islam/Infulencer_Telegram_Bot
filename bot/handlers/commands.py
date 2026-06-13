@@ -4,7 +4,20 @@ from telegram.constants import ChatAction
 from bot.config import YOUTUBE_LINK, MEDIUM_LINK, INSTAGRAM_LINK, TWITTER_LINK, FACEBOOK_LINK, SUBSTACK_URL
 from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
 from bot.ai import get_ai_response
+from bot.database import track_activity
 
+def track_usage(command_name):
+    def decorator(func):
+        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+            if update.effective_user:
+                user_id = update.effective_user.id
+                username = update.effective_user.username or update.effective_user.first_name
+                track_activity(user_id, username, command_name)
+            return await func(update, context, *args, **kwargs)
+        return wrapper
+    return decorator
+
+@track_usage("start")
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = f"""
 👋 <b>Assalamu Alaikum! Welcome to my content hub!</b>
@@ -22,6 +35,7 @@ I share all my latest content from my platforms here. You can also ask me questi
     """
     await update.message.reply_text(welcome_text, parse_mode="HTML")
 
+@track_usage("socials")
 async def socials_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show social media links"""
     socials_text = f"""
@@ -35,6 +49,7 @@ async def socials_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     await update.message.reply_text(socials_text, parse_mode="HTML")
 
+@track_usage("latest")
 async def latest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action(ChatAction.TYPING)
     message = "🔄 <b>Fetching latest content...</b>\n\n"
@@ -61,6 +76,7 @@ async def latest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Currently no new content. Check back soon! 📌", parse_mode="HTML")
 
+@track_usage("youtube")
 async def youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action(ChatAction.TYPING)
     yt_msg, yt_btn, _ = await get_youtube_posts(limit=3)
@@ -70,6 +86,7 @@ async def youtube(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"No videos yet. Subscribe here: {YOUTUBE_LINK}", parse_mode="HTML")
 
+@track_usage("medium")
 async def medium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action(ChatAction.TYPING)
     med_msg, med_btn, _ = await get_medium_posts(limit=3)
@@ -79,6 +96,7 @@ async def medium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"No articles yet. Follow me on Medium: {MEDIUM_LINK}", parse_mode="HTML")
 
+@track_usage("substack")
 async def substack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action(ChatAction.TYPING)
     sub_msg, sub_btn, _ = await get_substack_posts(limit=3)
@@ -88,6 +106,7 @@ async def substack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"No newsletters yet. Subscribe here: {SUBSTACK_URL}", parse_mode="HTML")
 
+@track_usage("ask")
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.replace("/ask", "", 1).strip()
     if not query:
@@ -106,6 +125,7 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     await update.message.reply_text(response, parse_mode="HTML")
 
+@track_usage("help")
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
 <b>🤖 Available Commands:</b>

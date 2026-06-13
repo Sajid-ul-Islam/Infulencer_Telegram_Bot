@@ -65,13 +65,13 @@ def ping_self():
         except Exception as e:
             logger.error(f"Self-ping failed: {e}")
 
-# Premium HTML/CSS/JS single page dashboard design
+# Premium HTML/CSS/JS single page dashboard design for BB Bot HUB
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Influencer Bot Admin Hub</title>
+    <title>BB Bot HUB Admin</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -700,7 +700,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <!-- Authentication Overlay -->
     <div id="login-overlay" class="login-overlay">
         <div class="login-card glass">
-            <h2>Admin Login</h2>
+            <h2>BB Bot HUB Login</h2>
             <div id="login-error" class="login-error">Incorrect password. Please try again.</div>
             <div class="form-group">
                 <label for="password-input">Dashboard Password</label>
@@ -730,9 +730,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <!-- Sidebar -->
     <aside>
         <div class="brand">
-            <div class="brand-logo">I</div>
+            <div class="brand-logo">B</div>
             <div class="brand-info">
-                <h2>Influencer Hub</h2>
+                <h2>BB Bot HUB</h2>
                 <div class="status-badge">
                     <div class="status-dot"></div>
                     <span>Bot Active</span>
@@ -744,6 +744,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <li class="nav-item active" data-tab="overview">
                 <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
                 Overview
+            </li>
+            <li class="nav-item" data-tab="analytics">
+                <svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"></path></svg>
+                User Analytics
             </li>
             <li class="nav-item" data-tab="faqs">
                 <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
@@ -785,7 +789,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <header>
             <div>
                 <h1 id="page-title">Dashboard</h1>
-                <p style="color: var(--text-secondary); margin-top: 4px;">Overview and controls for your Telegram Community</p>
+                <p style="color: var(--text-secondary); margin-top: 4px;">Administration & User Tracker for BB Bot HUB</p>
             </div>
             <div class="header-actions">
                 <button onclick="refreshAll()" class="btn btn-secondary">
@@ -849,10 +853,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         Quick Actions
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
+                        <button onclick="switchTab('analytics')" class="btn btn-secondary">Open User Analytics</button>
                         <button onclick="switchTab('faqs')" class="btn btn-secondary">Manage FAQ Database</button>
                         <button onclick="switchTab('broadcast')" class="btn btn-secondary">Send Channel Broadcast</button>
                         <button onclick="switchTab('giveaways')" class="btn btn-secondary">Draw Giveaway Winner</button>
-                        <button onclick="switchTab('logs')" class="btn btn-secondary">Open Terminal Console</button>
                     </div>
                 </div>
                 
@@ -875,6 +879,60 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             <span>📰 Substack Newsletter</span>
                         </a>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- USER ANALYTICS TAB -->
+        <section id="tab-analytics" class="tab-content">
+            <div class="grid-2col">
+                <div class="card glass">
+                    <div class="card-title">📈 Popular Actions / Commands</div>
+                    <div id="analytics-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 16px;">
+                        <div class="no-data">No activity logged yet</div>
+                    </div>
+                </div>
+                
+                <div class="card glass">
+                    <div class="card-title">👥 Top Active Users</div>
+                    <div class="table-container" style="max-height: 280px; overflow-y: auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>ID</th>
+                                    <th>Clicks</th>
+                                    <th>Last Active</th>
+                                </tr>
+                            </thead>
+                            <tbody id="analytics-users-body">
+                                <tr>
+                                    <td colspan="4" class="no-data">Loading active users...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card glass" style="margin-top: 24px;">
+                <div class="card-title">⏱️ Live Command Click Stream</div>
+                <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>User ID</th>
+                                <th>Action/Command Triggered</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody id="analytics-activity-body">
+                            <tr>
+                                <td colspan="4" class="no-data">Loading live activity logs...</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </section>
@@ -1086,6 +1144,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (tabId === 'faqs') refreshFAQs();
             if (tabId === 'suggestions') refreshSuggestions();
             if (tabId === 'questions') refreshQuestions();
+            if (tabId === 'analytics') refreshAnalytics();
             if (tabId === 'logs') refreshLogs();
         }
 
@@ -1204,6 +1263,81 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('channel-id-text').innerText = data.channel_id || 'Not Set';
             if (data.channel_id) {
                 document.getElementById('channel-link-display').href = `https://t.me/${data.channel_id.replace('-100', '')}`;
+            }
+        }
+
+        // Refresh Analytics tab data
+        async function refreshAnalytics() {
+            // 1. Fetch activity stream
+            const activity = await fetchAPI('/api/analytics/activity');
+            const activityBody = document.getElementById('analytics-activity-body');
+            activityBody.innerHTML = '';
+            
+            if (!activity || activity.length === 0) {
+                activityBody.innerHTML = '<tr><td colspan="4" class="no-data">No command clicks recorded yet</td></tr>';
+            } else {
+                activity.forEach(act => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><strong>${escapeHTML(act.username)}</strong></td>
+                        <td style="color: var(--text-secondary); font-size: 13px;">${escapeHTML(act.user_id)}</td>
+                        <td><span style="padding: 4px 8px; border-radius: 6px; font-size: 13px; font-weight: 600; background: rgba(59,130,246,0.1); color: var(--primary);">${escapeHTML(act.command)}</span></td>
+                        <td style="color: var(--text-secondary); font-size: 13px;">${escapeHTML(act.timestamp)}</td>
+                    `;
+                    activityBody.appendChild(tr);
+                });
+            }
+
+            // 2. Fetch active users list
+            const users = await fetchAPI('/api/analytics/users');
+            const usersBody = document.getElementById('analytics-users-body');
+            usersBody.innerHTML = '';
+            
+            const cmdPopularity = {};
+
+            if (!users || users.length === 0) {
+                usersBody.innerHTML = '<tr><td colspan="4" class="no-data">No active users recorded</td></tr>';
+            } else {
+                users.forEach(u => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><strong>${escapeHTML(u.username)}</strong></td>
+                        <td style="color: var(--text-secondary); font-size: 13px;">${escapeHTML(u.user_id)}</td>
+                        <td><span style="font-weight: 700; color: var(--purple);">${escapeHTML(u.total_clicks)}</span></td>
+                        <td style="color: var(--text-secondary); font-size: 13px;">${escapeHTML(u.last_active)}</td>
+                    `;
+                    usersBody.appendChild(tr);
+
+                    // Aggregate command counts for popularity stats
+                    if (u.commands) {
+                        Object.keys(u.commands).forEach(cmd => {
+                            cmdPopularity[cmd] = (cmdPopularity[cmd] || 0) + u.commands[cmd];
+                        });
+                    }
+                });
+            }
+
+            // 3. Render popularity metrics
+            const statsGrid = document.getElementById('analytics-stats-grid');
+            statsGrid.innerHTML = '';
+            
+            const popularCmds = Object.keys(cmdPopularity);
+            if (popularCmds.length === 0) {
+                statsGrid.innerHTML = '<div class="no-data">No action stats recorded yet</div>';
+            } else {
+                popularCmds.sort((a,b) => cmdPopularity[b] - cmdPopularity[a]).forEach(cmd => {
+                    const card = document.createElement('div');
+                    card.style.background = 'rgba(255, 255, 255, 0.03)';
+                    card.style.border = '1px solid var(--border-color)';
+                    card.style.borderRadius = '10px';
+                    card.style.padding = '12px 16px';
+                    card.style.textAlign = 'center';
+                    card.innerHTML = `
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase;">/${escapeHTML(cmd)}</div>
+                        <div style="font-size: 20px; font-weight: 700; color: var(--primary);">${escapeHTML(cmdPopularity[cmd])}</div>
+                    `;
+                    statsGrid.appendChild(card);
+                });
             }
         }
 
@@ -1397,10 +1531,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        function closeWinnerModal() {
-            document.getElementById('winner-modal').style.display = 'none';
-        }
-
         // Live logs console
         let lastLogCount = 0;
         async function refreshLogs() {
@@ -1435,6 +1565,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (activeTab === 'faqs') refreshFAQs();
             if (activeTab === 'suggestions') refreshSuggestions();
             if (activeTab === 'questions') refreshQuestions();
+            if (activeTab === 'analytics') refreshAnalytics();
             if (activeTab === 'logs') refreshLogs();
         }
 
@@ -1446,6 +1577,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 refreshStats();
                 const activeTab = document.querySelector('.nav-item.active').getAttribute('data-tab');
                 if (activeTab === 'logs') refreshLogs();
+                if (activeTab === 'analytics') refreshAnalytics();
             }, 3000);
         }
 
@@ -1475,6 +1607,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 .replace(/"/g, '\\\\"')
                 .replace(/\\n/g, '\\\\n')
                 .replace(/\\r/g, '\\\\r');
+        }
+
+        function closeWinnerModal() {
+            document.getElementById('winner-modal').style.display = 'none';
         }
     </script>
 </body>
@@ -1588,6 +1724,45 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     logger.error(f"Error fetching questions: {e}")
             self.send_json(200, questions)
+
+        elif path == '/api/analytics/activity':
+            activity = []
+            if db:
+                try:
+                    docs = db.collection("activity_logs").order_by("timestamp", direction="DESCENDING").limit(50).stream()
+                    for doc in docs:
+                        d = doc.to_dict()
+                        ts = d.get("timestamp")
+                        ts_str = ts.strftime('%Y-%m-%d %H:%M:%S') if ts else "N/A"
+                        activity.append({
+                            "user_id": d.get("user_id", "N/A"),
+                            "username": d.get("username", "Unknown"),
+                            "command": d.get("command", "N/A"),
+                            "timestamp": ts_str
+                        })
+                except Exception as e:
+                    logger.error(f"Error fetching activity logs: {e}")
+            self.send_json(200, activity)
+
+        elif path == '/api/analytics/users':
+            users_list = []
+            if db:
+                try:
+                    docs = db.collection("users").order_by("total_clicks", direction="DESCENDING").limit(50).stream()
+                    for doc in docs:
+                        d = doc.to_dict()
+                        ts = d.get("last_active")
+                        ts_str = ts.strftime('%Y-%m-%d %H:%M:%S') if ts else "N/A"
+                        users_list.append({
+                            "user_id": doc.id,
+                            "username": d.get("username", "Unknown"),
+                            "last_active": ts_str,
+                            "total_clicks": d.get("total_clicks", 0),
+                            "commands": d.get("commands", {})
+                        })
+                except Exception as e:
+                    logger.error(f"Error fetching top users: {e}")
+            self.send_json(200, users_list)
 
         elif path == '/api/logs':
             self.send_json(200, list(memory_log_handler.logs))
@@ -1791,7 +1966,7 @@ def start_dummy_server():
     """Starts the HTTP dashboard server binding to PORT."""
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), DashboardHandler)
-    logger.info(f"Admin dashboard web server running on port {port}")
+    logger.info(f"BB Bot HUB web server running on port {port}")
     server.serve_forever()
 
 def start_server_threads():
@@ -1802,4 +1977,4 @@ def start_server_threads():
     ping_thread = threading.Thread(target=ping_self, daemon=True)
     ping_thread.start()
     
-    logger.info("Admin dashboard web server & self-pinger initialized successfully!")
+    logger.info("BB Bot HUB web server & self-pinger initialized successfully!")

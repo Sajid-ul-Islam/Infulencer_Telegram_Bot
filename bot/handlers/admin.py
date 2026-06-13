@@ -4,7 +4,7 @@ from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboa
 from telegram.ext import ContextTypes
 from firebase_admin import firestore
 from bot.config import logger, is_admin, CHANNEL_ID
-from bot.database import db, FAQ, save_faq, remove_faq
+from bot.database import db, FAQ, save_faq, remove_faq, track_activity
 from bot.jobs import send_channel_message, auto_post_youtube, auto_post_medium, auto_post_substack
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -205,6 +205,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Error fetching statistics.")
 
 async def suggest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    track_activity(update.effective_user.id, update.effective_user.first_name, "suggest")
     suggestion = update.message.text.replace("/suggest", "", 1).strip()
     if not suggestion:
         await update.message.reply_text(

@@ -3,7 +3,7 @@ from telegram.ext import ContextTypes
 from telegram.constants import ChatAction
 from firebase_admin import firestore
 from bot.config import logger, is_admin
-from bot.database import db
+from bot.database import db, track_activity
 from bot.ai import get_ai_response, get_faq_response
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -33,8 +33,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "question": user_message,
                 "timestamp": firestore.SERVER_TIMESTAMP
             })
+            track_activity(user_id, username, "ask_agent")
         except Exception as e:
             logger.error(f"Firebase error: {e}")
+    else:
+        track_activity(user_id, username, "ask_agent")
 
     # Smart filtering for Grok AI
     should_use_ai = False
@@ -85,6 +88,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             
         user_id = query.from_user.id
         username = query.from_user.first_name
+        track_activity(user_id, username, f"callback:{query.data}")
         
         try:
             doc_ref = db.collection("giveaway_entries").document(str(user_id))
