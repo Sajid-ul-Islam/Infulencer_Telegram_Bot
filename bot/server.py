@@ -1919,6 +1919,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         })
                 except Exception as e:
                     logger.error(f"Error fetching suggestions: {e}")
+            else:
+                suggestions = [
+                    {"username": "Sajid Islam", "suggestion": "Explain how geopolitical conflicts impact global semiconductor supply chains.", "timestamp": "2026-06-13 09:40:00"},
+                    {"username": "JohnDoe", "suggestion": "Do a video on the history of OPEC and how oil reserves influence state sovereignty.", "timestamp": "2026-06-13 09:22:15"}
+                ]
             self.send_json(200, suggestions)
 
         elif path == '/api/questions':
@@ -1937,6 +1942,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         })
                 except Exception as e:
                     logger.error(f"Error fetching questions: {e}")
+            else:
+                questions = [
+                    {"username": "Sajid Islam", "question": "What video editing software do you recommend for beginners?", "timestamp": "2026-06-13 09:35:10"},
+                    {"username": "JaneSmith", "question": "How often do you release new articles on Medium?", "timestamp": "2026-06-13 09:12:00"}
+                ]
             self.send_json(200, questions)
 
         elif path == '/api/analytics/activity':
@@ -1956,6 +1966,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         })
                 except Exception as e:
                     logger.error(f"Error fetching activity logs: {e}")
+            else:
+                activity = [
+                    {"user_id": "12345678", "username": "Sajid Islam", "command": "youtube", "timestamp": "10:14:02"},
+                    {"user_id": "98765432", "username": "JohnDoe", "command": "medium", "timestamp": "10:12:15"},
+                    {"user_id": "12345678", "username": "Sajid Islam", "command": "ask_agent", "timestamp": "10:10:44"},
+                    {"user_id": "88888888", "username": "JaneSmith", "command": "start", "timestamp": "10:05:12"}
+                ]
             self.send_json(200, activity)
 
         elif path == '/api/analytics/users':
@@ -1976,6 +1993,30 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         })
                 except Exception as e:
                     logger.error(f"Error fetching top users: {e}")
+            else:
+                users_list = [
+                    {
+                        "user_id": "12345678",
+                        "username": "Sajid Islam",
+                        "last_active": "2026-06-13 10:14:02",
+                        "total_clicks": 18,
+                        "commands": {"start": 2, "youtube": 10, "ask_agent": 6}
+                    },
+                    {
+                        "user_id": "98765432",
+                        "username": "JohnDoe",
+                        "last_active": "2026-06-13 10:12:15",
+                        "total_clicks": 9,
+                        "commands": {"start": 1, "medium": 5, "substack": 3}
+                    },
+                    {
+                        "user_id": "88888888",
+                        "username": "JaneSmith",
+                        "last_active": "2026-06-13 10:05:12",
+                        "total_clicks": 4,
+                        "commands": {"start": 1, "help": 3}
+                    }
+                ]
             self.send_json(200, users_list)
 
         elif path == '/api/logs':
