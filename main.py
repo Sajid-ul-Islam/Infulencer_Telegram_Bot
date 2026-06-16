@@ -21,17 +21,17 @@ from bot.handlers.messages import handle_message, welcome_new_members, button_ca
 async def post_init(application: Application):
     commands = [
         BotCommand("start", "Welcome message"),
-        BotCommand("latest", "Get my latest content"),
-        BotCommand("youtube", "Latest video"),
-        BotCommand("medium", "Latest article"),
-        BotCommand("substack", "Latest newsletter"),
-        BotCommand("socials", "Links to all my platforms"),
-        BotCommand("ask", "Ask me a question (with memory)"),
-        BotCommand("dua", "Search Hisnul Muslim duas"),
+        BotCommand("help", "Show all commands"),
+        BotCommand("ask", "Ask me anything (with memory)"),
+        BotCommand("latest", "Get all latest content"),
+        BotCommand("youtube", "Latest YouTube video"),
+        BotCommand("medium", "Latest Medium article"),
+        BotCommand("substack", "Latest Substack newsletter"),
         BotCommand("quran", "Search Quran verses"),
+        BotCommand("dua", "Search Hisnul Muslim duas"),
+        BotCommand("socials", "Links to all my platforms"),
+        BotCommand("suggest", "Suggest a topic idea"),
         BotCommand("forget", "Clear conversation history"),
-        BotCommand("suggest", "Suggest a geopolitics topic"),
-        BotCommand("help", "Show all commands")
     ]
     await application.bot.set_my_commands(commands)
     logger.info("Bot commands menu updated.")
