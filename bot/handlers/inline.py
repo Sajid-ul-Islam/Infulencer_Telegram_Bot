@@ -1,7 +1,8 @@
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import ContextTypes
 from bot.config import logger, INLINE_MAX_RESULTS
-from bot.ai import search_knowledge_base, search_dua, search_quran
+from bot.vectordb import search_vector
+from bot.search import search_bm25
 
 TOPICS = {
     "iman": "ঈমান (Faith)",
@@ -14,6 +15,13 @@ TOPICS = {
     "business": "ব্যবসা (Business)",
     "halal": "হালাল-হারাম (Halal-Haram)"
 }
+
+def _search_wrapped(query: str, doc_type: str, n: int = 3) -> list[dict]:
+    hits = search_vector(query, n_results=n * 2, where={"type": doc_type})
+    if hits:
+        return hits[:n]
+    bm25 = search_bm25(query, n_results=n * 2)
+    return [h for h in bm25 if h.get("metadata", {}).get("type") == doc_type][:n]
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.strip().lower()
@@ -32,62 +40,54 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     results = []
     seen = set()
 
-    try:
-        quran_results = search_quran(query)
-        for r in quran_results[:3]:
-            rid = f"q_{r.get('id', r['metadata'].get('surah', '0'))}"
-            if rid in seen:
-                continue
-            seen.add(rid)
-            surah_num = r["metadata"].get("surah", "")
-            verse_num = r["metadata"].get("verse", "")
-            arabic = r["metadata"].get("arabic", "")
-            bangla = r["metadata"].get("bangla", "")
-            text = f"📖 {arabic}\n\n{bangla}\n\n— সূরা {surah_num}, আয়াত {verse_num}"
-            results.append(InlineQueryResultArticle(
-                id=rid,
-                title=f"Quran {surah_num}:{verse_num}",
-                description=bangla[:80],
-                input_message_content=InputTextMessageContent(text)
-            ))
-    except Exception as e:
-        logger.error(f"Inline Quran error: {e}")
+    for r in _search_wrapped(query, "quran"):
+        rid = f"q_{r.get('id', '0')}"
+        if rid in seen:
+            continue
+        seen.add(rid)
+        meta = r["metadata"]
+        surah = meta.get("surah_name", meta.get("surah", str(meta.get("surah_no", ""))))
+        verse = meta.get("ayah_no", meta.get("verse", ""))
+        arabic = meta.get("arabic", "")
+        translation = meta.get("translation", meta.get("bangla", ""))
+        text = f"📖 {arabic}\n\n{translation}\n\n— {surah} {verse}"
+        results.append(InlineQueryResultArticle(
+            id=rid,
+            title=f"Quran {surah}:{verse}",
+            description=translation[:80],
+            input_message_content=InputTextMessageContent(text)
+        ))
 
-    try:
-        dua_results = search_dua(query)
-        for r in dua_results[:3]:
-            rid = f"d_{r.get('id', r['metadata'].get('source', '0'))}"
-            if rid in seen:
-                continue
-            seen.add(rid)
-            text = r["metadata"].get("text", "") or r["metadata"].get("bangla", "")
-            en = r["metadata"].get("english", "")
-            desc = (en or text)[:80]
-            results.append(InlineQueryResultArticle(
-                id=rid,
-                title=f"🤲 Dua: {desc}",
-                description=desc,
-                input_message_content=InputTextMessageContent(text)
-            ))
-    except Exception as e:
-        logger.error(f"Inline Dua error: {e}")
+    for r in _search_wrapped(query, "dua"):
+        rid = f"d_{r.get('id', '0')}"
+        if rid in seen:
+            continue
+        seen.add(rid)
+        meta = r["metadata"]
+        text = meta.get("arabic", "") or meta.get("text", meta.get("bangla", ""))
+        en = meta.get("english", meta.get("translation", ""))
+        desc = (en or text)[:80]
+        results.append(InlineQueryResultArticle(
+            id=rid,
+            title=f"🤲 Dua: {desc}",
+            description=desc,
+            input_message_content=InputTextMessageContent(text)
+        ))
 
-    try:
-        kb_results = search_knowledge_base(query)
-        for r in kb_results[:3]:
-            rid = f"kb_{r.get('id', '0')}"
-            if rid in seen:
-                continue
-            seen.add(rid)
-            content = r.get("content", "")[:200]
-            results.append(InlineQueryResultArticle(
-                id=rid,
-                title=f"📚 KB: {content[:60]}",
-                description=content[:80],
-                input_message_content=InputTextMessageContent(content)
-            ))
-    except Exception as e:
-        logger.error(f"Inline KB error: {e}")
+    for r in _search_wrapped(query, "kb"):
+        rid = f"kb_{r.get('id', '0')}"
+        if rid in seen:
+            continue
+        seen.add(rid)
+        content = r.get("text", "")[:200]
+        meta = r.get("metadata", {})
+        title = meta.get("title", content[:60])
+        results.append(InlineQueryResultArticle(
+            id=rid,
+            title=f"📚 KB: {title[:60]}",
+            description=content[:80],
+            input_message_content=InputTextMessageContent(content or "No content")
+        ))
 
     if not results:
         results.append(InlineQueryResultArticle(
