@@ -115,7 +115,7 @@ def main():
     job_queue.run_daily(auto_post_medium, time=datetime.time(18, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
     job_queue.run_daily(auto_post_substack, time=datetime.time(14, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
     job_queue.run_daily(greeting_post, time=datetime.time(8, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
-    job_queue.run_weekly(weekly_digest, day_of_week=6, time=datetime.time(12, 0, tzinfo=BOT_TZ))
+    job_queue.run_daily(weekly_digest, time=datetime.time(12, 0, tzinfo=BOT_TZ), days=(6,))
 
     logger.info("Bot started successfully!")
     application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
