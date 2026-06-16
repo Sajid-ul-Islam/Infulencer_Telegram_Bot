@@ -30,12 +30,18 @@ FAQ = {
 
 def load_faqs():
     if not db:
+        logger.info("Firebase DB not configured — FAQs disabled.")
         return
     try:
-        docs = db.collection("faqs").stream()
-        for doc in docs:
-            FAQ[doc.id] = doc.to_dict().get("response", "")
-        logger.info("Loaded FAQs from Firestore.")
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(lambda: list(db.collection("faqs").stream()))
+            docs = future.result(timeout=15)
+            for doc in docs:
+                FAQ[doc.id] = doc.to_dict().get("response", "")
+            logger.info(f"Loaded {len(docs)} FAQs from Firestore.")
+    except concurrent.futures.TimeoutError:
+        logger.error("Firestore FAQ query timed out after 15s")
     except Exception as e:
         logger.error(f"Error loading FAQs: {e}")
 

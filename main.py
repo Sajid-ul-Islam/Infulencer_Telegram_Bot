@@ -1,4 +1,5 @@
 import datetime
+import asyncio
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, InlineQueryHandler
 from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ
@@ -13,20 +14,41 @@ from bot.handlers.commands import (
 from bot.handlers.admin import (
     postlatest_command, ban_command, mute_command, questions_command,
     poll_command, broadcast_command, addfaq_command, rmfaq_command,
-    listfaq_command,     stats_command,     ingest_kb_command, ingest_duas_command, ingest_quran_kb_command, suggest_command,
+    listfaq_command, stats_command, ingest_kb_command, ingest_duas_command, ingest_quran_kb_command, suggest_command,
     listsuggestions_command, startgiveaway_command, pickwinner_command
 )
 from bot.handlers.messages import handle_message, welcome_new_members, button_callback_handler, handle_voice
 from bot.handlers.inline import inline_query
 
+async def background_init(app):
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, load_faqs)
+        logger.info("FAQs loaded from Firestore.")
+    except Exception as e:
+        logger.warning(f"FAQ loading failed (non-blocking): {e}")
+    try:
+        await loop.run_in_executor(None, lambda: ingest_knowledge_base(reindex=False))
+        logger.info("Knowledge base ingested.")
+    except Exception as e:
+        logger.warning(f"KB ingestion failed (non-blocking): {e}")
+    try:
+        await ingest_duas(force_reindex=False)
+    except Exception as e:
+        logger.warning(f"Dua ingestion failed (non-blocking): {e}")
+    try:
+        await ingest_quran_verses(force_reindex=False)
+    except Exception as e:
+        logger.warning(f"Quran ingestion failed (non-blocking): {e}")
+
 async def post_init(application: Application):
     try:
         webhook_info = await application.bot.get_webhook_info()
         if webhook_info and webhook_info.url:
-            logger.info(f"Clearing existing webhook: {webhook_info.url}")
+            logger.info(f"Clearing webhook: {webhook_info.url}")
             await application.bot.delete_webhook(drop_pending_updates=True)
     except Exception as e:
-        logger.warning(f"Webhook check/delete failed (non-fatal): {e}")
+        logger.warning(f"Webhook cleanup: {e}")
     commands = [
         BotCommand("start", "Welcome message"),
         BotCommand("help", "Show all commands"),
@@ -43,27 +65,10 @@ async def post_init(application: Application):
     ]
     await application.bot.set_my_commands(commands)
     logger.info("Bot commands menu updated.")
+    asyncio.create_task(background_init(application))
 
 def main():
     start_server_threads()
-
-    load_faqs()
-    ingest_knowledge_base(reindex=False)
-    logger.info("Knowledge base ingested into vector DB on startup.")
-
-    try:
-        import asyncio
-        asyncio.get_event_loop().create_task(ingest_duas(force_reindex=False))
-        logger.info("Dua ingestion task scheduled in background.")
-    except Exception as e:
-        logger.error(f"Failed to schedule dua ingestion: {e}")
-
-    try:
-        import asyncio
-        asyncio.get_event_loop().create_task(ingest_quran_verses(force_reindex=False))
-        logger.info("Quran ingestion task scheduled in background.")
-    except Exception as e:
-        logger.error(f"Failed to schedule quran ingestion: {e}")
 
     application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
@@ -99,7 +104,6 @@ def main():
     application.add_handler(CommandHandler("pickwinner", pickwinner_command))
 
     application.add_handler(InlineQueryHandler(inline_query))
-
     application.add_handler(CallbackQueryHandler(button_callback_handler))
 
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members))
