@@ -7,7 +7,7 @@ from bot.ai import get_ai_response
 from bot.database import track_activity
 from bot.memory import clear_history, get_history_count
 from bot.pipeline import ingest_knowledge_base, ingest_rss_content, get_pipeline_stats
-from bot.search import search_duas
+from bot.search import search_duas, search_quran
 from bot.handlers.feedback import FEEDBACK_POSITIVE, FEEDBACK_NEGATIVE
 
 def track_usage(command_name):
@@ -26,7 +26,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = """
 \U0001f44b <b>Assalamu Alaikum! Welcome to my content hub!</b>
 
-I share all my latest content from my platforms here. You can also ask me questions about my content or search Islamic duas!
+I share all my latest content from my platforms here. You can also ask me questions, search Islamic duas, or explore the Quran!
 
 <b>\U0001f4cc Commands:</b>
 /latest - Get my latest content
@@ -36,6 +36,7 @@ I share all my latest content from my platforms here. You can also ask me questi
 /socials - Links to all my platforms
 /ask - Ask me a question (with memory!)
 /dua - Search Hisnul Muslim duas
+/quran - Search Quran verses
 /forget - Clear our conversation history
 /help - Show all commands
     """
@@ -167,6 +168,36 @@ async def dua_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+@track_usage("quran")
+async def quran_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.replace("/quran", "", 1).strip()
+    if not query:
+        await update.message.reply_text(
+            "\U0001f4dc <b>Search the Quran</b>\n\n"
+            "Search all 114 surahs and 6236 verses with Arabic text, word-by-word meanings, and English translation.\n\n"
+            "Usage: /quran <search query>\n"
+            "Example: /quran ayat al-kursi\n"
+            "Example: /quran surah yasin verse 9\n"
+            "Example: /quran mercy\n"
+            "Example: /quran 36:9",
+            parse_mode="HTML"
+        )
+        return
+
+    await update.message.chat.send_action(ChatAction.TYPING)
+    result = search_quran(query)
+    if not result or "No relevant Quran verses found" in result:
+        await update.message.reply_text(
+            "\U0001f4dc No Quran verses found for your query. Try different keywords or ask the AI directly with /ask.",
+            parse_mode="HTML"
+        )
+        return
+
+    await update.message.reply_text(
+        f"\U0001f4dc <b>Quran Search Results</b>\n\n{result}",
+        parse_mode="HTML"
+    )
+
 @track_usage("forget")
 async def forget_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -205,6 +236,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /socials - Links to all my platforms
 /ask - Ask me something (with memory!)
 /dua - Search Hisnul Muslim duas
+/quran - Search Quran verses
 /forget - Clear our conversation memory
 /suggest - Suggest a topic
 /help - This message

@@ -952,6 +952,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
                 <div class="stat-card glass">
                     <div class="stat-header">
+                        <span>Quran Verses</span>
+                        <svg viewBox="0 0 24 24" class="stat-icon" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                    </div>
+                    <div class="stat-value" id="stat-quran">0</div>
+                    <div class="stat-desc">Indexed Quran verses</div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-header">
+                        <span>Duas</span>
+                        <svg viewBox="0 0 24 24" class="stat-icon" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>
+                    </div>
+                    <div class="stat-value" id="stat-dua">0</div>
+                    <div class="stat-desc">Indexed Islamic duas</div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-header">
                         <span>Feedback</span>
                         <svg viewBox="0 0 24 24" class="stat-icon" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>
                     </div>
@@ -1377,6 +1393,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('stat-suggestions').innerText = data.suggestions_count;
             document.getElementById('stat-giveaway').innerText = data.giveaway_count;
             document.getElementById('stat-vectordb').innerText = data.vector_documents || 0;
+            document.getElementById('stat-quran').innerText = data.quran_count || 0;
+            document.getElementById('stat-dua').innerText = data.dua_count || 0;
             document.getElementById('stat-feedback').innerHTML = `+${data.feedback_positive || 0} / -${data.feedback_negative || 0}`;
             document.getElementById('giveaway-active-entries').innerText = data.giveaway_count;
 
@@ -1931,6 +1949,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "feedback_negative": feedback_counts["negative"],
                 "vector_documents": pipeline_stats["vector_documents"],
                 "kb_entries": pipeline_stats["kb_entries"],
+                "dua_count": pipeline_stats.get("dua_count", 0),
+                "quran_count": pipeline_stats.get("quran_count", 0),
                 "channel_id": CHANNEL_ID,
                 "ping_history": list(ping_history)
             })

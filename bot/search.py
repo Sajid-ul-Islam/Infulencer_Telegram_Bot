@@ -120,5 +120,26 @@ def search_duas(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
         )
     return "\n\n---\n\n".join(formatted)
 
+def search_quran(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
+    hits = search_vector(query, n_results=n_results * 2, where={"type": "quran"})
+    if not hits:
+        bm25_hits = search_bm25(query, n_results=n_results * 2)
+        hits = [h for h in bm25_hits if h.get("metadata", {}).get("type") == "quran"]
+    if not hits:
+        return "No relevant Quran verses found for this query."
+    if use_rerank and len(hits) > 1:
+        hits = rerank(query, hits, top_n=min(3, len(hits)))
+    formatted = []
+    for hit in hits:
+        meta = hit.get("metadata", {})
+        formatted.append(
+            f"Surah: {meta.get('surah_name', '')} ({meta.get('surah_no', '')}) — {meta.get('surah_name_english', '')}\n"
+            f"Ayah: {meta.get('ayah_no', '')} ({meta.get('verse_key', '')})\n"
+            f"Juz: {meta.get('juz', '')} | Page: {meta.get('page', '')}\n\n"
+            f"Arabic:\n{meta.get('arabic', '')}\n\n"
+            f"Translation:\n{meta.get('translation', '')}"
+        )
+    return "\n\n---\n\n".join(formatted)
+
 def rebuild_bm25_index():
     _rebuild_bm25()

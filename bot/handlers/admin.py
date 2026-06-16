@@ -6,7 +6,7 @@ from firebase_admin import firestore
 from bot.config import logger, is_admin, CHANNEL_ID
 from bot.database import db, FAQ, save_faq, remove_faq, track_activity, get_feedback_counts
 from bot.jobs import send_channel_message, auto_post_youtube, auto_post_medium, auto_post_substack
-from bot.pipeline import ingest_knowledge_base, ingest_duas, get_pipeline_stats
+from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses, get_pipeline_stats
 from bot.vectordb import get_document_count
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -237,6 +237,17 @@ async def ingest_duas_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     count = await ingest_duas(force_reindex=True)
     await update.message.reply_text(
         f"✅ Duas re-indexed! {count} novas imported into vector DB.",
+        parse_mode="HTML"
+    )
+
+async def ingest_quran_kb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ You don't have permission to use this command.")
+        return
+    await update.message.reply_text("🔄 Re-indexing all Quran verses (this may take a few minutes)...")
+    count = await ingest_quran_verses(force_reindex=True)
+    await update.message.reply_text(
+        f"✅ Quran re-indexed! {count} verses imported into vector DB.",
         parse_mode="HTML"
     )
 

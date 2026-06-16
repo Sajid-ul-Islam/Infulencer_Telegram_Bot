@@ -118,8 +118,14 @@ async def ingest_duas(force_reindex: bool = False) -> int:
     count = await ingest_all_duas(force_reindex=force_reindex)
     return count
 
+async def ingest_quran_verses(force_reindex: bool = False) -> int:
+    from bot.quran_scraper import ingest_quran
+    count = await ingest_quran(force_reindex=force_reindex)
+    return count
+
 def get_pipeline_stats() -> dict:
     dua_count = 0
+    quran_count = 0
     try:
         from bot.vectordb import get_client
         client = get_client()
@@ -127,10 +133,12 @@ def get_pipeline_stats() -> dict:
         all_docs = collection.get(include=["metadatas"])
         if all_docs and all_docs["metadatas"]:
             dua_count = sum(1 for m in all_docs["metadatas"] if m.get("type") == "dua")
+            quran_count = sum(1 for m in all_docs["metadatas"] if m.get("type") == "quran")
     except Exception:
         pass
     return {
         "vector_documents": get_document_count(),
         "kb_entries": len(load_knowledge_base()),
-        "dua_count": dua_count
+        "dua_count": dua_count,
+        "quran_count": quran_count
     }
