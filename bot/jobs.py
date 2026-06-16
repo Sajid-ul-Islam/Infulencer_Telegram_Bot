@@ -2,14 +2,13 @@ from telegram import InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot.config import logger, CHANNEL_ID
 from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
+from bot.pipeline import ingest_rss_content
 
-# Global state for duplicate prevention
 last_posted_youtube_url = None
 last_posted_medium_url = None
 last_posted_substack_url = None
 
 async def send_channel_message(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
-    """Send message to your channel"""
     if not CHANNEL_ID:
         logger.warning("CHANNEL_ID not set. Skipping channel broadcast.")
         return
@@ -32,6 +31,7 @@ async def auto_post_youtube(context: ContextTypes.DEFAULT_TYPE):
             reply_markup = InlineKeyboardMarkup([[yt_btn]]) if yt_btn else None
             await send_channel_message(context, yt_msg, reply_markup=reply_markup)
             last_posted_youtube_url = link
+        await ingest_rss_content()
     except Exception as e:
         logger.error(f"Error in auto_post_youtube: {e}")
 
@@ -43,6 +43,7 @@ async def auto_post_medium(context: ContextTypes.DEFAULT_TYPE):
             reply_markup = InlineKeyboardMarkup([[med_btn]]) if med_btn else None
             await send_channel_message(context, med_msg, reply_markup=reply_markup)
             last_posted_medium_url = link
+        await ingest_rss_content()
     except Exception as e:
         logger.error(f"Error in auto_post_medium: {e}")
 
@@ -54,12 +55,13 @@ async def auto_post_substack(context: ContextTypes.DEFAULT_TYPE):
             reply_markup = InlineKeyboardMarkup([[sub_btn]]) if sub_btn else None
             await send_channel_message(context, sub_msg, reply_markup=reply_markup)
             last_posted_substack_url = link
+        await ingest_rss_content()
     except Exception as e:
         logger.error(f"Error in auto_post_substack: {e}")
 
 async def greeting_post(context: ContextTypes.DEFAULT_TYPE):
     greeting = """
-✨ <b>Assalamu Alaikum!</b>
+\u2728 <b>Assalamu Alaikum!</b>
 
 Welcome to my content hub! 
 

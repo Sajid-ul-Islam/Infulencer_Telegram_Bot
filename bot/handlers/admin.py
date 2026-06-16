@@ -4,8 +4,10 @@ from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboa
 from telegram.ext import ContextTypes
 from firebase_admin import firestore
 from bot.config import logger, is_admin, CHANNEL_ID
-from bot.database import db, FAQ, save_faq, remove_faq, track_activity
+from bot.database import db, FAQ, save_faq, remove_faq, track_activity, get_feedback_counts
 from bot.jobs import send_channel_message, auto_post_youtube, auto_post_medium, auto_post_substack
+from bot.pipeline import ingest_knowledge_base, get_pipeline_stats
+from bot.vectordb import get_document_count
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -179,30 +181,53 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission.")
         return
-        
-    if not db:
-        await update.message.reply_text("Database not configured.")
+
+    db_available = db is not None
+
+    faq_count = len(FAQ)
+    doc_count = get_document_count()
+    feedback_counts = get_feedback_counts()
+    pipeline_stats = get_pipeline_stats()
+
+    stats = (
+        "📊 <b>Admin Dashboard Stats:</b>\n\n"
+        f"📚 Active Custom FAQs: <b>{faq_count}</b>\n"
+        f"🧠 Vector DB Documents: <b>{doc_count}</b>\n"
+        f"📦 KB Source Entries: <b>{pipeline_stats['kb_entries']}</b>\n"
+        f"👍 Feedback Positive: <b>{feedback_counts['positive']}</b>\n"
+        f"👎 Feedback Negative: <b>{feedback_counts['negative']}</b>\n"
+    )
+
+    if db_available:
+        try:
+            q_count = len(list(db.collection("questions").stream()))
+            s_count = len(list(db.collection("suggestions").stream()))
+            g_count = len(list(db.collection("giveaway_entries").stream()))
+            stats += (
+                f"\n<b>Firestore Stats:</b>\n"
+                f"❓ Total Questions: <b>{q_count}</b>\n"
+                f"💡 Total Suggestions: <b>{s_count}</b>\n"
+                f"🎁 Giveaway Entries: <b>{g_count}</b>"
+            )
+        except Exception as e:
+            logger.error(f"Error fetching Firestore stats: {e}")
+            stats += "\n\n⚠️ Error fetching Firestore stats."
+
+    await update.message.reply_text(stats, parse_mode="HTML")
+
+async def ingest_kb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ You don't have permission to use this command.")
         return
-        
-    await update.message.reply_text("📊 Calculating stats...")
-    
-    try:
-        q_count = len(list(db.collection("questions").stream()))
-        s_count = len(list(db.collection("suggestions").stream()))
-        g_count = len(list(db.collection("giveaway_entries").stream()))
-        faq_count = len(FAQ)
-        
-        stats = (
-            "📊 <b>Admin Dashboard Stats:</b>\n\n"
-            f"❓ Total Questions Asked: <b>{q_count}</b>\n"
-            f"💡 Total Suggestions: <b>{s_count}</b>\n"
-            f"🎁 Current Giveaway Entries: <b>{g_count}</b>\n"
-            f"📚 Active Custom FAQs: <b>{faq_count}</b>"
-        )
-        await update.message.reply_text(stats, parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Error fetching stats: {e}")
-        await update.message.reply_text("Error fetching statistics.")
+    await update.message.reply_text("🔄 Re-indexing knowledge base into vector DB...")
+    count = ingest_knowledge_base(reindex=True)
+    pipeline_stats = get_pipeline_stats()
+    await update.message.reply_text(
+        f"✅ Knowledge base ingested!\n\n"
+        f"📦 Chunks indexed: <b>{pipeline_stats['vector_documents']}</b>\n"
+        f"📄 Source entries: <b>{pipeline_stats['kb_entries']}</b>",
+        parse_mode="HTML"
+    )
 
 async def suggest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_activity(update.effective_user.id, update.effective_user.first_name, "suggest")

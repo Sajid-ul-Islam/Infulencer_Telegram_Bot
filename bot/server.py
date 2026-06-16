@@ -23,7 +23,9 @@ from bot.config import (
     TWITTER_LINK,
     FACEBOOK_LINK
 )
-from bot.database import FAQ, save_faq, remove_faq, db
+from bot.database import FAQ, save_faq, remove_faq, db, get_feedback_counts
+from bot.vectordb import get_document_count
+from bot.pipeline import get_pipeline_stats
 
 # Global start time for uptime calculation
 START_TIME = time.time()
@@ -940,6 +942,30 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div class="stat-value" id="stat-suggestions">0</div>
                     <div class="stat-desc">User suggested video topics</div>
                 </div>
+                <div class="stat-card glass">
+                    <div class="stat-header">
+                        <span>Vector DB Docs</span>
+                        <svg viewBox="0 0 24 24" class="stat-icon" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
+                    </div>
+                    <div class="stat-value" id="stat-vectordb">0</div>
+                    <div class="stat-desc">Document chunks in vector DB</div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-header">
+                        <span>Feedback</span>
+                        <svg viewBox="0 0 24 24" class="stat-icon" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>
+                    </div>
+                    <div class="stat-value" id="stat-feedback">+0 / -0</div>
+                    <div class="stat-desc">Positive / Negative feedback</div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-header">
+                        <span>Giveaway Entries</span>
+                        <svg viewBox="0 0 24 24" class="stat-icon" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                    </div>
+                    <div class="stat-value" id="stat-giveaway">0</div>
+                    <div class="stat-desc">Current giveaway participants</div>
+                </div>
             </div>
 
             <!-- Dashboard Columns -->
@@ -1350,6 +1376,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('stat-questions').innerText = data.questions_count;
             document.getElementById('stat-suggestions').innerText = data.suggestions_count;
             document.getElementById('stat-giveaway').innerText = data.giveaway_count;
+            document.getElementById('stat-vectordb').innerText = data.vector_documents || 0;
+            document.getElementById('stat-feedback').innerHTML = `+${data.feedback_positive || 0} / -${data.feedback_negative || 0}`;
             document.getElementById('giveaway-active-entries').innerText = data.giveaway_count;
 
             // Heartbeat monitor update
@@ -1890,12 +1918,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     logger.error(f"Error fetching stats: {e}")
 
+            feedback_counts = get_feedback_counts()
+            pipeline_stats = get_pipeline_stats()
+
             self.send_json(200, {
                 "uptime": uptime_str,
                 "faqs_count": len(FAQ),
                 "questions_count": q_count,
                 "suggestions_count": s_count,
                 "giveaway_count": g_count,
+                "feedback_positive": feedback_counts["positive"],
+                "feedback_negative": feedback_counts["negative"],
+                "vector_documents": pipeline_stats["vector_documents"],
+                "kb_entries": pipeline_stats["kb_entries"],
                 "channel_id": CHANNEL_ID,
                 "ping_history": list(ping_history)
             })

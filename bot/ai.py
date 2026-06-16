@@ -1,51 +1,93 @@
 import json
 import httpx
 from bot.config import (
-    logger, XAI_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, 
+    logger, XAI_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY,
     GROQ_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY,
     YOUTUBE_LINK, MEDIUM_LINK, INSTAGRAM_LINK, TWITTER_LINK, FACEBOOK_LINK
 )
-from bot.database import FAQ
+from bot.database import FAQ, db, track_activity
+from bot.search import search_pipeline
+from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
+from bot.memory import get_history, add_to_history
+from bot.vectordb import get_document_count
 
-# Load Mock Knowledge Base for RAG
-try:
-    with open("knowledge_base.json", "r", encoding="utf-8") as f:
-        KNOWLEDGE_BASE = json.load(f)
-except Exception as e:
-    logger.error(f"Error loading knowledge base: {e}")
-    KNOWLEDGE_BASE = []
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_knowledge_base",
+            "description": "Searches the creator's past posts (YouTube, Medium, Instagram) to answer specific questions about gear, opinions, setup, or past content using semantic search.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query (e.g. 'camera setup', 'editing software', 'productivity tips')"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_faq_answer",
+            "description": "Looks up a quick answer from the frequently asked questions database. Use this for common questions about the creator.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The user's question to match against FAQ keywords"
+                    }
+                },
+                "required": ["question"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_recent_content",
+            "description": "Fetches the latest posts from a specific content platform.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "platform": {
+                        "type": "string",
+                        "enum": ["youtube", "medium", "substack"],
+                        "description": "The platform to fetch content from"
+                    }
+                },
+                "required": ["platform"]
+            }
+        }
+    }
+]
 
-def search_knowledge_base(query: str) -> str:
-    """Mock vector search using basic keyword matching"""
-    query_lower = query.lower()
-    results = []
-    for post in KNOWLEDGE_BASE:
-        score = sum(1 for word in query_lower.split() if word in post["content"].lower() or word in post["title"].lower())
-        if score > 0:
-            results.append((score, post))
-            
-    results.sort(key=lambda x: x[0], reverse=True)
-    top_results = results[:2]
-    
-    if not top_results:
-        return "No relevant past posts found for this query."
-        
-    formatted_results = []
-    for _, post in top_results:
-        formatted_results.append(
-            f"Platform: {post['platform']}\nTitle: {post['title']}\nContent: {post['content']}\nLink: {post['url']}"
-        )
-    return "\n\n---\n\n".join(formatted_results)
-
-def get_system_prompt() -> str:
+def get_system_prompt(user_id: int = None) -> str:
+    faq_context = json.dumps(FAQ, indent=2)
+    doc_count = get_document_count()
     return f"""
 You are the official Telegram assistant for Bearded Bangali, a tech and lifestyle content creator.
-Your job is to answer questions enthusiastically and politely using the following context.
-If the user greets you with "Salam" or any variation, you MUST reply with "Walikumus Salam". Otherwise, always maintain a polite, respectful tone.
-Do not invent facts about him. Keep answers concise (1-3 sentences max).
+Your job is to answer questions enthusiastically and politely using the tools available to you.
 
-Current known FAQs/Facts:
-{json.dumps(FAQ, indent=2)}
+Rules:
+- If the user greets you with "Salam" or any variation, you MUST reply with "Walikumus Salam".
+- Use the search_knowledge_base tool when users ask about specific gear, setups, opinions, or past content.
+- Use the get_faq_answer tool for common quick questions.
+- Use the get_recent_content tool when users ask for the latest videos, articles, or newsletters.
+- Always maintain a polite, respectful tone.
+- Keep answers concise (1-3 sentences max) unless the user asks for details.
+- Do not invent facts about the creator. Use tools to find real information.
+
+Knowledge Base Stats:
+- {doc_count} documents indexed in the vector database
+- {len(FAQ)} FAQ entries available
+
+Current FAQs/Facts:
+{faq_context}
 
 Social Media Links:
 - YouTube: {YOUTUBE_LINK}
@@ -55,93 +97,121 @@ Social Media Links:
 - Facebook: {FACEBOOK_LINK}
 """
 
-async def call_openai_compatible(api_key: str, base_url: str, model: str, user_message: str, use_tools: bool = True) -> str:
-    """Unified handler for OpenRouter, Groq, OpenAI, and xAI using OpenAI format"""
+async def execute_tool(tool_name: str, arguments: dict) -> str:
+    if tool_name == "search_knowledge_base":
+        query = arguments.get("query", "")
+        if not query:
+            return "No query provided."
+        return search_pipeline(query)
+    elif tool_name == "get_faq_answer":
+        question = arguments.get("question", "").lower()
+        for keyword, response in FAQ.items():
+            if keyword in question:
+                return f"FAQ Match: {response}"
+        return "No FAQ match found for this question."
+    elif tool_name == "get_recent_content":
+        platform = arguments.get("platform", "").lower()
+        if platform == "youtube":
+            msg, btn, link = await get_youtube_posts(limit=3)
+        elif platform == "medium":
+            msg, btn, link = await get_medium_posts(limit=3)
+        elif platform == "substack":
+            msg, btn, link = await get_substack_posts(limit=3)
+        else:
+            return f"Unknown platform: {platform}"
+        return msg or f"No recent {platform} content found."
+    return f"Unknown tool: {tool_name}"
+
+async def call_agent_with_tools(api_key: str, base_url: str, model: str, messages: list, max_tool_rounds: int = 3) -> str:
     if not api_key:
         return None
-        
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "search_knowledge_base",
-                "description": "Searches the creator's past YouTube, Medium, and Instagram posts to answer specific questions about their gear, opinions, or past content.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "The search query (e.g. 'camera setup', 'editing software')"}
-                    },
-                    "required": ["query"]
-                }
-            }
-        }
-    ]
-
-    messages = [
-        {"role": "system", "content": get_system_prompt().strip()},
-        {"role": "user", "content": user_message}
-    ]
-
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
-    
-    # OpenRouter specific headers
     if "openrouter.ai" in base_url:
         headers["HTTP-Referer"] = "https://t.me/BeardedBangaliBot"
         headers["X-Title"] = "Bearded Bangali Bot"
+    payload = {
+        "messages": messages,
+        "model": model,
+        "temperature": 0.7,
+        "tools": TOOLS,
+        "tool_choice": "auto"
+    }
+    for round_num in range(max_tool_rounds):
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.post(base_url, headers=headers, json=payload)
+                response.raise_for_status()
+                message = response.json()["choices"][0]["message"]
+                if not message.get("tool_calls"):
+                    return message.get("content", "")
+                messages.append({
+                    "role": "assistant",
+                    "content": message.get("content") or None,
+                    "tool_calls": message["tool_calls"]
+                })
+                for tool_call in message["tool_calls"]:
+                    func_name = tool_call["function"]["name"]
+                    try:
+                        args = json.loads(tool_call["function"]["arguments"])
+                    except json.JSONDecodeError:
+                        args = {}
+                    tool_result = await execute_tool(func_name, args)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": str(tool_result)[:2000]
+                    })
+                payload["messages"] = messages
+        except Exception as e:
+            logger.error(f"Error in agent loop ({base_url}, round {round_num}): {e}")
+            return None
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            payload.pop("tools", None)
+            payload.pop("tool_choice", None)
+            final_response = await client.post(base_url, headers=headers, json=payload)
+            final_response.raise_for_status()
+            return final_response.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.error(f"Error in final agent call ({base_url}): {e}")
+        return None
 
+async def call_openai_compatible(api_key: str, base_url: str, model: str, user_message: str, use_tools: bool = True) -> str:
+    if not api_key:
+        return None
+    messages = [
+        {"role": "system", "content": get_system_prompt().strip()},
+        {"role": "user", "content": user_message}
+    ]
+    if use_tools:
+        return await call_agent_with_tools(api_key, base_url, model, messages)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    if "openrouter.ai" in base_url:
+        headers["HTTP-Referer"] = "https://t.me/BeardedBangaliBot"
+        headers["X-Title"] = "Bearded Bangali Bot"
     payload = {
         "messages": messages,
         "model": model,
         "temperature": 0.7
     }
-    
-    if use_tools:
-        payload["tools"] = tools
-        payload["tool_choice"] = "auto"
-
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            # First Call
             response = await client.post(base_url, headers=headers, json=payload)
             response.raise_for_status()
-            message = response.json()["choices"][0]["message"]
-            
-            # Check if it wants to use a tool
-            if message.get("tool_calls"):
-                messages.append(message)
-                for tool_call in message["tool_calls"]:
-                    if tool_call["function"]["name"] == "search_knowledge_base":
-                        args = json.loads(tool_call["function"]["arguments"])
-                        search_result = search_knowledge_base(args["query"])
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call["id"],
-                            "content": search_result
-                        })
-                
-                # Second Call
-                payload["messages"] = messages
-                payload.pop("tools", None)
-                payload.pop("tool_choice", None)
-                
-                final_response = await client.post(base_url, headers=headers, json=payload)
-                final_response.raise_for_status()
-                return final_response.json()["choices"][0]["message"]["content"]
-            
-            return message.get("content")
-            
+            return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
         logger.error(f"Error calling {base_url}: {e}")
         return None
 
 async def get_anthropic_response(user_message: str) -> str:
-    """Fallback to Anthropic Claude"""
     if not ANTHROPIC_API_KEY:
         return None
-
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
@@ -153,7 +223,7 @@ async def get_anthropic_response(user_message: str) -> str:
                 },
                 json={
                     "model": "claude-3-haiku-20240307",
-                    "max_tokens": 200,
+                    "max_tokens": 300,
                     "system": get_system_prompt().strip(),
                     "messages": [{"role": "user", "content": user_message}]
                 }
@@ -165,18 +235,14 @@ async def get_anthropic_response(user_message: str) -> str:
         return None
 
 async def get_gemini_response(user_message: str) -> str:
-    """Fallback to Google Gemini API"""
     if not GEMINI_API_KEY:
         return None
-
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    
     payload = {
         "system_instruction": {"parts": {"text": get_system_prompt().strip()}},
         "contents": [{"role": "user", "parts": [{"text": user_message}]}],
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 200}
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 300}
     }
-
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(url, json=payload)
@@ -186,56 +252,55 @@ async def get_gemini_response(user_message: str) -> str:
         logger.error(f"Error calling Gemini API: {e}")
         return None
 
-async def get_ai_response(user_message: str) -> str:
-    """Ultimate Router: Cascades through 6 AI providers!"""
-    
-    # 1. OpenRouter (Primary)
-    if OPENROUTER_API_KEY:
-        res = await call_openai_compatible(OPENROUTER_API_KEY, "https://openrouter.ai/api/v1/chat/completions", "openai/gpt-4o-mini", user_message)
-        if res: return res
-        logger.info("OpenRouter failed. Falling back to Groq...")
-
-    # 2. Groq (Fast Fallback)
-    if GROQ_API_KEY:
-        res = await call_openai_compatible(GROQ_API_KEY, "https://api.groq.com/openai/v1/chat/completions", "llama-3.1-8b-instant", user_message, use_tools=False)
-        if res: return res
-        logger.info("Groq failed. Falling back to OpenAI...")
-
-    # 3. OpenAI (Solid Fallback)
-    if OPENAI_API_KEY:
-        res = await call_openai_compatible(OPENAI_API_KEY, "https://api.openai.com/v1/chat/completions", "gpt-4o-mini", user_message)
-        if res: return res
-        logger.info("OpenAI failed. Falling back to Anthropic...")
-
-    # 4. Anthropic (Haiku Fallback)
-    if ANTHROPIC_API_KEY:
-        res = await get_anthropic_response(user_message)
-        if res: return res
-        logger.info("Anthropic failed. Falling back to xAI...")
-
-    # 5. xAI (Grok Fallback)
-    if XAI_API_KEY:
-        res = await call_openai_compatible(XAI_API_KEY, "https://api.x.ai/v1/chat/completions", "grok-beta", user_message)
-        if res: return res
-        logger.info("xAI failed. Falling back to Gemini...")
-
-    # 6. Gemini (Final Fallback)
-    if GEMINI_API_KEY:
-        res = await get_gemini_response(user_message)
-        if res: return res
-        logger.info("Gemini failed. No AI models available!")
-
+async def get_ai_response(user_message: str, user_id: int = None, use_memory: bool = True) -> str:
+    if use_memory and user_id:
+        history = get_history(user_id, max_exchanges=3)
+        if history:
+            context_messages = [{"role": "system", "content": get_system_prompt(user_id).strip()}]
+            for msg in history:
+                context_messages.append(msg)
+            context_messages.append({"role": "user", "content": user_message})
+            messages = context_messages
+        else:
+            messages = None
+    else:
+        messages = None
+    provider_chain = [
+        ("OpenRouter", lambda: call_agent_with_tools(
+            OPENROUTER_API_KEY,
+            "https://openrouter.ai/api/v1/chat/completions",
+            "openai/gpt-4o-mini",
+            messages or [{"role": "system", "content": get_system_prompt(user_id).strip()}, {"role": "user", "content": user_message}]
+        ) if OPENROUTER_API_KEY else None),
+        ("Groq", lambda: call_openai_compatible(GROQ_API_KEY, "https://api.groq.com/openai/v1/chat/completions", "llama-3.1-8b-instant", user_message, use_tools=False)),
+        ("OpenAI", lambda: call_agent_with_tools(
+            OPENAI_API_KEY,
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-4o-mini",
+            messages or [{"role": "system", "content": get_system_prompt(user_id).strip()}, {"role": "user", "content": user_message}]
+        ) if OPENAI_API_KEY else None),
+        ("Anthropic", lambda: get_anthropic_response(user_message)),
+        ("xAI", lambda: call_openai_compatible(XAI_API_KEY, "https://api.x.ai/v1/chat/completions", "grok-beta", user_message)),
+        ("Gemini", lambda: get_gemini_response(user_message))
+    ]
+    for name, fn in provider_chain:
+        try:
+            res = await fn()
+            if res:
+                if use_memory and user_id:
+                    add_to_history(user_id, "user", user_message)
+                    add_to_history(user_id, "assistant", res)
+                return res
+            logger.info(f"{name} failed or returned empty. Trying next...")
+        except Exception as e:
+            logger.error(f"{name} errored: {e}")
     return None
 
 def get_faq_response(user_message: str) -> str:
-    """Match user question to FAQ"""
     user_message_lower = user_message.lower()
-    
     if any(word in user_message_lower for word in ["salam", "assalam", "salam alaikum"]):
         return "Walikumus Salam! 😊\nHow can I help you today? Type /help to see what I can do."
-        
     for keyword, response in FAQ.items():
         if keyword in user_message_lower:
             return response
-    
     return None

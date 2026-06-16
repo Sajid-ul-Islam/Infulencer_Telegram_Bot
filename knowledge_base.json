@@ -3,7 +3,7 @@
     "id": "yt_1",
     "platform": "YouTube",
     "title": "My Editing Workflow for 2026",
-    "content": "I've officially switched entirely to Adobe Premiere Pro for all my video editing. The new AI masking features have saved me hours of time! My typical workflow takes about 4 hours per video now. I color grade everything using Lumetri.",
+    "content": "I've officially switched entirely to Adobe Premiere Pro for all my video editing. The new AI masking features have saved me hours of time! My typical workflow takes about 4 hours per video now. I color grade everything using Lumetri. I use a custom keyboard shortcut setup that I've refined over years. My export settings are H.264 at 50 Mbps for 4K footage.",
     "url": "https://www.youtube.com/watch?v=dummy1",
     "date": "2026-05-10"
   },
@@ -11,7 +11,7 @@
     "id": "med_1",
     "platform": "Medium",
     "title": "Why I Stopped Using Final Cut",
-    "content": "A lot of people ask why I moved away from Final Cut Pro. Honestly, it's just the ecosystem. Working with After Effects and Premiere is so seamless. Final Cut is great for beginners, but Premiere is what the industry uses.",
+    "content": "A lot of people ask why I moved away from Final Cut Pro. Honestly, it's just the ecosystem. Working with After Effects and Premiere is so seamless. Final Cut is great for beginners, but Premiere is what the industry uses. The collaboration features in Premiere are unmatched when working with a team. I also love the integration with Adobe Fonts and Stock.",
     "url": "https://medium.com/@b3ngali/dummy2",
     "date": "2026-04-15"
   },
@@ -19,8 +19,48 @@
     "id": "ig_1",
     "platform": "Instagram",
     "title": "New Studio Setup",
-    "content": "Just finished setting up the new studio! The main camera is now a Sony A7S III with a 24-70mm G-Master lens. Lighting is a single Aputure 120d with a light dome. Audio is handled by the Shure SM7B into a GoXLR.",
+    "content": "Just finished setting up the new studio! The main camera is now a Sony A7S III with a 24-70mm G-Master lens. Lighting is a single Aputure 120d with a light dome. Audio is handled by the Shure SM7B into a GoXLR. I also added a Nanlite PavoTube for background lighting effects. The studio is treated with acoustic panels for better sound.",
     "url": "https://instagram.com/p/dummy3",
     "date": "2026-06-01"
+  },
+  {
+    "id": "yt_2",
+    "platform": "YouTube",
+    "title": "My Daily Tech Setup 2026",
+    "content": "Here's what I use every day: My main machine is a MacBook Pro M3 Max with 64GB RAM. I run a dual monitor setup with Apple Studio Display and a LG 4K monitor. My keyboard is a Keychron Q1 with Gateron Red switches. Mouse is the Logitech MX Master 3S. For audio, I use AirPods Max for meetings and Sony WH-1000XM5 for deep work.",
+    "url": "https://www.youtube.com/watch?v=dummy4",
+    "date": "2026-05-20"
+  },
+  {
+    "id": "med_2",
+    "platform": "Medium",
+    "title": "How I Plan My Content Calendar",
+    "content": "Content planning is crucial for consistency. I use Notion as my main planning tool with a custom template. Every month I plan 4 videos, 2 articles, and daily social media posts. I batch film all my YouTube videos in one day each week. My content pillars are: tech tutorials, productivity tips, and industry insights. I track everything with a simple Trello board.",
+    "url": "https://medium.com/@b3ngali/dummy5",
+    "date": "2026-03-20"
+  },
+  {
+    "id": "ig_2",
+    "platform": "Instagram",
+    "title": "Behind the Scenes: Podcast Recording",
+    "content": "Here's my podcast recording setup! I use two Shure SM7B mics into a Rodecaster Pro II. The cameras are a Sony A7S III and a Sony ZV-1 as a backup angle. I record locally on SD cards and use Riverside.fm as a backup. My co-host uses a simple Rode NT-USB Mini. We edit in Descript and publish to Spotify and Apple Podcasts.",
+    "url": "https://instagram.com/p/dummy6",
+    "date": "2026-05-25"
+  },
+  {
+    "id": "yt_3",
+    "platform": "YouTube",
+    "title": "5 Productivity Apps I Use Every Day",
+    "content": "These apps keep me productive: 1. Todoist for task management with the GTD methodology. 2. Notion for all my notes and documentation. 3. Arc Browser for work and Chrome for personal stuff. 4. Raycast as my Spotlight replacement on Mac. 5. CleanShot X for screenshots and screen recording. Each of these tools saves me at least an hour per day.",
+    "url": "https://www.youtube.com/watch?v=dummy7",
+    "date": "2026-04-01"
+  },
+  {
+    "id": "med_3",
+    "platform": "Medium",
+    "title": "My Thoughts on AI in Content Creation",
+    "content": "AI is changing content creation rapidly. I use ChatGPT for brainstorming video ideas and writing scripts. Midjourney helps me create custom thumbnails. ElevenLabs is great for voiceovers when I need them. But I believe the human touch is irreplaceable. AI should be a tool, not a replacement. The best content still comes from genuine experience and personality.",
+    "url": "https://medium.com/@b3ngali/dummy8",
+    "date": "2026-02-14"
   }
 ]
