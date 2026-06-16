@@ -20,6 +20,13 @@ from bot.handlers.messages import handle_message, welcome_new_members, button_ca
 from bot.handlers.inline import inline_query
 
 async def post_init(application: Application):
+    try:
+        webhook_info = await application.bot.get_webhook_info()
+        if webhook_info and webhook_info.url:
+            logger.info(f"Clearing existing webhook: {webhook_info.url}")
+            await application.bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logger.warning(f"Webhook check/delete failed (non-fatal): {e}")
     commands = [
         BotCommand("start", "Welcome message"),
         BotCommand("help", "Show all commands"),
@@ -107,7 +114,7 @@ def main():
     job_queue.run_weekly(weekly_digest, day_of_week=6, time=datetime.time(12, 0, tzinfo=BOT_TZ))
 
     logger.info("Bot started successfully!")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
