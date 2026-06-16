@@ -22,6 +22,8 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "")  # e.g. http://localhost:11434
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 TIMEZONE_STR = os.getenv("TIMEZONE", "UTC")
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "admin")
 

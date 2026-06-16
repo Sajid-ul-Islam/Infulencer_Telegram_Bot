@@ -3,6 +3,7 @@ import httpx
 from bot.config import (
     logger, XAI_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY,
     GROQ_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY,
+    OLLAMA_BASE_URL, OLLAMA_MODEL,
     YOUTUBE_LINK, MEDIUM_LINK, INSTAGRAM_LINK, TWITTER_LINK, FACEBOOK_LINK
 )
 from bot.database import FAQ
@@ -325,6 +326,30 @@ async def get_gemini_response(user_message: str, lang: str = "en") -> str:
         logger.error(f"Error calling Gemini API: {e}")
         return None
 
+async def get_ollama_response(user_message: str, lang: str = "en") -> str:
+    base_url = OLLAMA_BASE_URL.rstrip("/")
+    if not base_url:
+        return None
+    system_prompt = get_system_prompt(lang=lang).strip()
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            payload = {
+                "model": OLLAMA_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                "stream": False,
+                "options": {"temperature": 0.7}
+            }
+            response = await client.post(f"{base_url}/v1/chat/completions" if "v1" not in base_url else f"{base_url}/chat/completions", json=payload)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("message", {}).get("content") or data.get("response", "")
+    except Exception as e:
+        logger.warning(f"Ollama unavailable ({base_url}): {e}")
+        return None
+
 def _detect_lang(text: str) -> str:
     bengali_chars = sum(1 for c in text if ord(c) in range(0x0980, 0x09FF))
     return "bn" if bengali_chars > 3 else "en"
@@ -360,7 +385,8 @@ async def get_ai_response(user_message: str, user_id: int = None, use_memory: bo
         ) if OPENAI_API_KEY else None),
         ("Anthropic", lambda: get_anthropic_response(user_message, lang=lang)),
         ("xAI", lambda: call_openai_compatible(XAI_API_KEY, "https://api.x.ai/v1/chat/completions", "grok-beta", user_message)),
-        ("Gemini", lambda: get_gemini_response(user_message, lang=lang))
+        ("Gemini", lambda: get_gemini_response(user_message, lang=lang)),
+        ("Ollama", lambda: get_ollama_response(user_message, lang=lang))
     ]
     for name, fn in provider_chain:
         try:
