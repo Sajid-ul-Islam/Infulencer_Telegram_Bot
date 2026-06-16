@@ -6,7 +6,7 @@ from bot.config import (
     YOUTUBE_LINK, MEDIUM_LINK, INSTAGRAM_LINK, TWITTER_LINK, FACEBOOK_LINK
 )
 from bot.database import FAQ, db, track_activity
-from bot.search import search_pipeline
+from bot.search import search_pipeline, search_duas
 from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
 from bot.memory import get_history, add_to_history
 from bot.vectordb import get_document_count
@@ -63,6 +63,23 @@ TOOLS = [
                 "required": ["platform"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_dua",
+            "description": "Searches the Hisnul Muslim dua (Islamic supplication) database. Use this when users ask for specific duas, Islamic prayers, or supplications for various situations (sleeping, travel, food, sickness, etc.).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query for the dua (e.g. 'dua for sleeping', 'prayer for travel', 'supplication for food')"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
     }
 ]
 
@@ -76,6 +93,7 @@ Your job is to answer questions enthusiastically and politely using the tools av
 Rules:
 - If the user greets you with "Salam" or any variation, you MUST reply with "Walikumus Salam".
 - Use the search_knowledge_base tool when users ask about specific gear, setups, opinions, or past content.
+- Use the search_dua tool when users ask for Islamic duas, supplications, prayers, or Hisnul Muslim content. Always include the Arabic, transliteration, translation, and source when answering duas.
 - Use the get_faq_answer tool for common quick questions.
 - Use the get_recent_content tool when users ask for the latest videos, articles, or newsletters.
 - Always maintain a polite, respectful tone.
@@ -103,6 +121,11 @@ async def execute_tool(tool_name: str, arguments: dict) -> str:
         if not query:
             return "No query provided."
         return search_pipeline(query)
+    elif tool_name == "search_dua":
+        query = arguments.get("query", "")
+        if not query:
+            return "No query provided."
+        return search_duas(query)
     elif tool_name == "get_faq_answer":
         question = arguments.get("question", "").lower()
         for keyword, response in FAQ.items():

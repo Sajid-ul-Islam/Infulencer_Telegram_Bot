@@ -92,14 +92,17 @@ def add_documents(posts: list[dict]):
     except Exception as e:
         logger.error(f"Failed to add documents batch: {e}")
 
-def search_vector(query: str, n_results: int = 5) -> list[dict]:
+def search_vector(query: str, n_results: int = 5, where: dict = None) -> list[dict]:
     collection = get_collection()
     try:
-        results = collection.query(
-            query_texts=[query],
-            n_results=n_results,
-            include=["documents", "metadatas", "distances"]
-        )
+        kwargs = {
+            "query_texts": [query],
+            "n_results": n_results,
+            "include": ["documents", "metadatas", "distances"]
+        }
+        if where:
+            kwargs["where"] = where
+        results = collection.query(**kwargs)
         hits = []
         if results and results["ids"] and results["ids"][0]:
             for i, doc_id in enumerate(results["ids"][0]):

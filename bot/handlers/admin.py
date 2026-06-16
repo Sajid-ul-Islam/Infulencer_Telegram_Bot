@@ -6,7 +6,7 @@ from firebase_admin import firestore
 from bot.config import logger, is_admin, CHANNEL_ID
 from bot.database import db, FAQ, save_faq, remove_faq, track_activity, get_feedback_counts
 from bot.jobs import send_channel_message, auto_post_youtube, auto_post_medium, auto_post_substack
-from bot.pipeline import ingest_knowledge_base, get_pipeline_stats
+from bot.pipeline import ingest_knowledge_base, ingest_duas, get_pipeline_stats
 from bot.vectordb import get_document_count
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -226,6 +226,17 @@ async def ingest_kb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ Knowledge base ingested!\n\n"
         f"📦 Chunks indexed: <b>{pipeline_stats['vector_documents']}</b>\n"
         f"📄 Source entries: <b>{pipeline_stats['kb_entries']}</b>",
+        parse_mode="HTML"
+    )
+
+async def ingest_duas_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ You don't have permission to use this command.")
+        return
+    await update.message.reply_text("🔄 Re-indexing all duas from Hisnul Muslim source (this may take a minute)...")
+    count = await ingest_duas(force_reindex=True)
+    await update.message.reply_text(
+        f"✅ Duas re-indexed! {count} novas imported into vector DB.",
         parse_mode="HTML"
     )
 

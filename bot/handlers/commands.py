@@ -7,6 +7,7 @@ from bot.ai import get_ai_response
 from bot.database import track_activity
 from bot.memory import clear_history, get_history_count
 from bot.pipeline import ingest_knowledge_base, ingest_rss_content, get_pipeline_stats
+from bot.search import search_duas
 from bot.handlers.feedback import FEEDBACK_POSITIVE, FEEDBACK_NEGATIVE
 
 def track_usage(command_name):
@@ -25,7 +26,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = """
 \U0001f44b <b>Assalamu Alaikum! Welcome to my content hub!</b>
 
-I share all my latest content from my platforms here. You can also ask me questions about my content!
+I share all my latest content from my platforms here. You can also ask me questions about my content or search Islamic duas!
 
 <b>\U0001f4cc Commands:</b>
 /latest - Get my latest content
@@ -34,6 +35,7 @@ I share all my latest content from my platforms here. You can also ask me questi
 /substack - Latest newsletter
 /socials - Links to all my platforms
 /ask - Ask me a question (with memory!)
+/dua - Search Hisnul Muslim duas
 /forget - Clear our conversation history
 /help - Show all commands
     """
@@ -136,6 +138,35 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
     await update.message.reply_text(response, parse_mode="HTML", reply_markup=keyboard)
 
+@track_usage("dua")
+async def dua_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.replace("/dua", "", 1).strip()
+    if not query:
+        await update.message.reply_text(
+            "\U0001f54a <b>Search Islamic Duas</b>\n\n"
+            "Search the Hisnul Muslim collection of authentic duas and supplications.\n\n"
+            "Usage: /dua <search query>\n"
+            "Example: /dua dua for sleeping\n"
+            "Example: /dua prayer for travel\n"
+            "Example: /dua supplication for food",
+            parse_mode="HTML"
+        )
+        return
+
+    await update.message.chat.send_action(ChatAction.TYPING)
+    result = search_duas(query)
+    if not result or "No relevant duas found" in result:
+        await update.message.reply_text(
+            "\U0001f54a No duas found for your query. Try different keywords or ask the AI directly with /ask.",
+            parse_mode="HTML"
+        )
+        return
+
+    await update.message.reply_text(
+        f"\U0001f54a <b>Hisnul Muslim Search Results</b>\n\n{result}",
+        parse_mode="HTML"
+    )
+
 @track_usage("forget")
 async def forget_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -173,6 +204,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /substack - Latest newsletter
 /socials - Links to all my platforms
 /ask - Ask me something (with memory!)
+/dua - Search Hisnul Muslim duas
 /forget - Clear our conversation memory
 /suggest - Suggest a topic
 /help - This message

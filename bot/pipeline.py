@@ -113,8 +113,24 @@ async def ingest_rss_content():
         rebuild_bm25_index()
     return ingested
 
+async def ingest_duas(force_reindex: bool = False) -> int:
+    from bot.dua_scraper import ingest_all_duas
+    count = await ingest_all_duas(force_reindex=force_reindex)
+    return count
+
 def get_pipeline_stats() -> dict:
+    dua_count = 0
+    try:
+        from bot.vectordb import get_client
+        client = get_client()
+        collection = client.get_collection("knowledge_base")
+        all_docs = collection.get(include=["metadatas"])
+        if all_docs and all_docs["metadatas"]:
+            dua_count = sum(1 for m in all_docs["metadatas"] if m.get("type") == "dua")
+    except Exception:
+        pass
     return {
         "vector_documents": get_document_count(),
-        "kb_entries": len(load_knowledge_base())
+        "kb_entries": len(load_knowledge_base()),
+        "dua_count": dua_count
     }

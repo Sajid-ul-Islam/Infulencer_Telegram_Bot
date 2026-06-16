@@ -95,5 +95,30 @@ def search_pipeline(query: str, n_results: int = 5, use_rerank: bool = True) -> 
         )
     return "\n\n---\n\n".join(formatted)
 
+def search_duas(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
+    hits = search_vector(query, n_results=n_results * 2, where={"type": "dua"})
+    if not hits:
+        bm25_hits = search_bm25(query, n_results=n_results * 2)
+        hits = [h for h in bm25_hits if h.get("metadata", {}).get("type") == "dua"]
+    if not hits:
+        return "No relevant duas found for this query."
+    if use_rerank and len(hits) > 1:
+        hits = rerank(query, hits, top_n=min(3, len(hits)))
+    formatted = []
+    for hit in hits:
+        meta = hit.get("metadata", {})
+        dua_name = meta.get("dua_name", meta.get("title", "Dua"))
+        category = meta.get("category", "")
+        formatted.append(
+            f"Dua: {dua_name}\n"
+            f"Category: {category}\n"
+            f"Arabic: {meta.get('arabic', '')}\n"
+            f"Transliteration: {meta.get('transliteration', '')}\n"
+            f"Translation: {meta.get('translation', '')}\n"
+            f"Source: {meta.get('reference', '')}\n"
+            f"URL: {meta.get('url', '')}"
+        )
+    return "\n\n---\n\n".join(formatted)
+
 def rebuild_bm25_index():
     _rebuild_bm25()
