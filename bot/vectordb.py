@@ -1,9 +1,15 @@
 import os
 import json
 import re
-import chromadb
-from chromadb.utils import embedding_functions
 from bot.config import logger
+
+try:
+    import chromadb
+    from chromadb.utils import embedding_functions
+    _chromadb_available = True
+except ImportError:
+    _chromadb_available = False
+    logger.warning("chromadb not installed — vector search disabled, BM25 fallback only")
 
 CHROMA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "chroma_db")
 COLLECTION_NAME = "knowledge_base"
@@ -13,8 +19,13 @@ _client = None
 _collection = None
 _embedding_fn = None
 
+def _available():
+    return _chromadb_available
+
 def get_embedding_function():
     global _embedding_fn
+    if not _chromadb_available:
+        return None
     if _embedding_fn is None:
         try:
             _embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=MODEL_NAME)
@@ -25,31 +36,29 @@ def get_embedding_function():
 
 def get_client():
     global _client
+    if not _chromadb_available:
+        return None
     if _client is None:
-        try:
-            _client = chromadb.PersistentClient(path=CHROMA_DIR)
-        except Exception as e:
-            logger.error(f"Failed to init ChromaDB: {e}")
-            raise
+        _client = chromadb.PersistentClient(path=CHROMA_DIR)
     return _client
 
 def get_collection():
     global _collection
+    if not _chromadb_available:
+        return None
     if _collection is None:
-        try:
-            client = get_client()
-            _collection = client.get_or_create_collection(
-                name=COLLECTION_NAME,
-                embedding_function=get_embedding_function()
-            )
-        except Exception as e:
-            logger.error(f"Failed to get/create collection: {e}")
-            raise
+        client = get_client()
+        _collection = client.get_or_create_collection(
+            name=COLLECTION_NAME,
+            embedding_function=get_embedding_function()
+        )
     return _collection
 
 def add_document(post: dict):
+    coll = get_collection()
+    if not coll:
+        return
     text = f"{post['title']}\n{post['content']}"
-    collection = get_collection()
     post_id = post.get("id", f"doc_{hash(text)}")
     metadata = {
         "platform": post.get("platform", "unknown"),
@@ -59,41 +68,33 @@ def add_document(post: dict):
         "id": post_id
     }
     try:
-        collection.add(
-            documents=[text],
-            metadatas=[metadata],
-            ids=[post_id]
-        )
-        logger.info(f"Added document {post_id} to vector DB")
+        coll.add(documents=[text], metadatas=[metadata], ids=[post_id])
     except Exception as e:
-        logger.error(f"Failed to add document {post_id}: {e}")
+        logger.error(f"add_document failed: {e}")
 
 def add_documents(posts: list[dict]):
-    if not posts:
+    coll = get_collection()
+    if not coll or not posts:
         return
-    collection = get_collection()
-    ids = []
-    documents = []
-    metadatas = []
-    for post in posts:
-        post_id = post.get("id", f"doc_{hash(post['title'] + post['content'])}")
-        ids.append(post_id)
-        documents.append(f"{post['title']}\n{post['content']}")
-        metadatas.append({
-            "platform": post.get("platform", "unknown"),
-            "url": post.get("url", ""),
-            "date": post.get("date", ""),
-            "title": post.get("title", ""),
-            "id": post_id
-        })
+    ids = [p.get("id", f"doc_{hash(p['title'] + p['content'])}") for p in posts]
+    documents = [f"{p['title']}\n{p['content']}" for p in posts]
+    metadatas = [{
+        "platform": p.get("platform", "unknown"),
+        "url": p.get("url", ""),
+        "date": p.get("date", ""),
+        "title": p.get("title", ""),
+        "id": ids[i]
+    } for i, p in enumerate(posts)]
     try:
-        collection.add(documents=documents, metadatas=metadatas, ids=ids)
+        coll.add(documents=documents, metadatas=metadatas, ids=ids)
         logger.info(f"Added {len(posts)} documents to vector DB")
     except Exception as e:
-        logger.error(f"Failed to add documents batch: {e}")
+        logger.error(f"add_documents batch failed: {e}")
 
 def search_vector(query: str, n_results: int = 5, where: dict = None) -> list[dict]:
-    collection = get_collection()
+    coll = get_collection()
+    if not coll:
+        return []
     try:
         kwargs = {
             "query_texts": [query],
@@ -102,7 +103,7 @@ def search_vector(query: str, n_results: int = 5, where: dict = None) -> list[di
         }
         if where:
             kwargs["where"] = where
-        results = collection.query(**kwargs)
+        results = coll.query(**kwargs)
         hits = []
         if results and results["ids"] and results["ids"][0]:
             for i, doc_id in enumerate(results["ids"][0]):
@@ -118,45 +119,53 @@ def search_vector(query: str, n_results: int = 5, where: dict = None) -> list[di
         return []
 
 def build_bm25_corpus():
-    collection = get_collection()
+    coll = get_collection()
+    if not coll:
+        return [], []
     try:
-        all_docs = collection.get(include=["documents", "metadatas"])
+        all_docs = coll.get(include=["documents", "metadatas"])
         if not all_docs or not all_docs["ids"]:
             return [], []
         return all_docs["documents"], all_docs["metadatas"]
     except Exception as e:
-        logger.error(f"Failed to get corpus for BM25: {e}")
+        logger.error(f"build_bm25_corpus failed: {e}")
         return [], []
 
 def document_exists(post_id: str) -> bool:
-    collection = get_collection()
+    coll = get_collection()
+    if not coll:
+        return False
     try:
-        existing = collection.get(ids=[post_id])
-        return len(existing["ids"]) > 0 if existing else False
+        existing = coll.get(ids=[post_id])
+        return bool(existing and len(existing["ids"]) > 0)
     except Exception:
         return False
 
 def get_document_count() -> int:
-    collection = get_collection()
+    coll = get_collection()
+    if not coll:
+        return 0
     try:
-        return collection.count()
+        return coll.count()
     except Exception:
         return 0
 
 def delete_document(post_id: str):
-    collection = get_collection()
+    coll = get_collection()
+    if not coll:
+        return
     try:
-        collection.delete(ids=[post_id])
-        logger.info(f"Deleted document {post_id}")
+        coll.delete(ids=[post_id])
     except Exception as e:
-        logger.error(f"Failed to delete {post_id}: {e}")
+        logger.error(f"delete_document failed: {e}")
 
 def reset_collection():
     global _collection
+    client = get_client()
+    if not client:
+        return
     try:
-        client = get_client()
         client.delete_collection(COLLECTION_NAME)
         _collection = None
-        logger.info("Vector DB collection reset")
     except Exception as e:
-        logger.error(f"Failed to reset collection: {e}")
+        logger.error(f"reset_collection failed: {e}")
