@@ -5,13 +5,35 @@ from bot.config import (
     GROQ_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY,
     YOUTUBE_LINK, MEDIUM_LINK, INSTAGRAM_LINK, TWITTER_LINK, FACEBOOK_LINK
 )
-from bot.database import FAQ, db, track_activity
+from bot.database import FAQ
 from bot.search import search_pipeline, search_duas, search_quran
-from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
+from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts, extract_article_text
 from bot.memory import get_history, add_to_history
 from bot.vectordb import get_document_count
 
+LANG_PROMPTS = {
+    "en": "You are the official Telegram assistant for Bearded Bangali, a tech and lifestyle content creator. Answer in English.",
+    "bn": "আপনি হলেন Bearded Bangali-এর অফিসিয়াল টেলিগ্রাম অ্যাসিস্ট্যান্ট। দয়া করে বাংলায় উত্তর দিন।",
+}
+
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "browse_web",
+            "description": "Fetches the full text content from a given URL. Use this when users ask about current events, recent news, or any topic that requires fetching external web content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to fetch and extract text content from"
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -100,13 +122,10 @@ TOOLS = [
     }
 ]
 
-def get_system_prompt(user_id: int = None) -> str:
+def get_system_prompt(user_id: int = None, lang: str = "en") -> str:
     faq_context = json.dumps(FAQ, indent=2)
     doc_count = get_document_count()
-    return f"""
-You are the official Telegram assistant for Bearded Bangali, a tech and lifestyle content creator.
-Your job is to answer questions enthusiastically and politely using the tools available to you.
-
+    base = f"""
 Rules:
 - If the user greets you with "Salam" or any variation, you MUST reply with "Walikumus Salam".
 - Use the search_knowledge_base tool when users ask about specific gear, setups, opinions, or past content.
@@ -114,6 +133,7 @@ Rules:
 - Use the search_quran tool when users ask about Quran verses, surahs, or Islamic topics from the Quran. Always include the Arabic and translation when quoting verses.
 - Use the get_faq_answer tool for common quick questions.
 - Use the get_recent_content tool when users ask for the latest videos, articles, or newsletters.
+- Use the browse_web tool when users ask about current events, recent news, or any topic requiring external web content.
 - Always maintain a polite, respectful tone.
 - Keep answers concise (1-3 sentences max) unless the user asks for details.
 - Do not invent facts about the creator. Use tools to find real information.
@@ -132,9 +152,16 @@ Social Media Links:
 - X/Twitter: {TWITTER_LINK}
 - Facebook: {FACEBOOK_LINK}
 """
+    lang_prompt = LANG_PROMPTS.get(lang, LANG_PROMPTS["en"])
+    return lang_prompt + "\n" + base
 
 async def execute_tool(tool_name: str, arguments: dict) -> str:
-    if tool_name == "search_knowledge_base":
+    if tool_name == "browse_web":
+        url = arguments.get("url", "")
+        if not url:
+            return "No URL provided."
+        return await extract_article_text(url)
+    elif tool_name == "search_knowledge_base":
         query = arguments.get("query", "")
         if not query:
             return "No query provided."
@@ -255,7 +282,7 @@ async def call_openai_compatible(api_key: str, base_url: str, model: str, user_m
         logger.error(f"Error calling {base_url}: {e}")
         return None
 
-async def get_anthropic_response(user_message: str) -> str:
+async def get_anthropic_response(user_message: str, lang: str = "en") -> str:
     if not ANTHROPIC_API_KEY:
         return None
     try:
@@ -270,7 +297,7 @@ async def get_anthropic_response(user_message: str) -> str:
                 json={
                     "model": "claude-3-haiku-20240307",
                     "max_tokens": 300,
-                    "system": get_system_prompt().strip(),
+                    "system": get_system_prompt(lang=lang).strip(),
                     "messages": [{"role": "user", "content": user_message}]
                 }
             )
@@ -280,12 +307,12 @@ async def get_anthropic_response(user_message: str) -> str:
         logger.error(f"Error calling Anthropic API: {e}")
         return None
 
-async def get_gemini_response(user_message: str) -> str:
+async def get_gemini_response(user_message: str, lang: str = "en") -> str:
     if not GEMINI_API_KEY:
         return None
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {
-        "system_instruction": {"parts": {"text": get_system_prompt().strip()}},
+        "system_instruction": {"parts": {"text": get_system_prompt(lang=lang).strip()}},
         "contents": [{"role": "user", "parts": [{"text": user_message}]}],
         "generationConfig": {"temperature": 0.7, "maxOutputTokens": 300}
     }
@@ -298,11 +325,17 @@ async def get_gemini_response(user_message: str) -> str:
         logger.error(f"Error calling Gemini API: {e}")
         return None
 
+def _detect_lang(text: str) -> str:
+    bengali_chars = sum(1 for c in text if ord(c) in range(0x0980, 0x09FF))
+    return "bn" if bengali_chars > 3 else "en"
+
 async def get_ai_response(user_message: str, user_id: int = None, use_memory: bool = True) -> str:
+    lang = _detect_lang(user_message)
+    system_prompt = get_system_prompt(user_id, lang=lang).strip()
     if use_memory and user_id:
         history = get_history(user_id, max_exchanges=3)
         if history:
-            context_messages = [{"role": "system", "content": get_system_prompt(user_id).strip()}]
+            context_messages = [{"role": "system", "content": system_prompt}]
             for msg in history:
                 context_messages.append(msg)
             context_messages.append({"role": "user", "content": user_message})
@@ -316,18 +349,18 @@ async def get_ai_response(user_message: str, user_id: int = None, use_memory: bo
             OPENROUTER_API_KEY,
             "https://openrouter.ai/api/v1/chat/completions",
             "openai/gpt-4o-mini",
-            messages or [{"role": "system", "content": get_system_prompt(user_id).strip()}, {"role": "user", "content": user_message}]
+            messages or [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
         ) if OPENROUTER_API_KEY else None),
         ("Groq", lambda: call_openai_compatible(GROQ_API_KEY, "https://api.groq.com/openai/v1/chat/completions", "llama-3.1-8b-instant", user_message, use_tools=False)),
         ("OpenAI", lambda: call_agent_with_tools(
             OPENAI_API_KEY,
             "https://api.openai.com/v1/chat/completions",
             "gpt-4o-mini",
-            messages or [{"role": "system", "content": get_system_prompt(user_id).strip()}, {"role": "user", "content": user_message}]
+            messages or [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
         ) if OPENAI_API_KEY else None),
-        ("Anthropic", lambda: get_anthropic_response(user_message)),
+        ("Anthropic", lambda: get_anthropic_response(user_message, lang=lang)),
         ("xAI", lambda: call_openai_compatible(XAI_API_KEY, "https://api.x.ai/v1/chat/completions", "grok-beta", user_message)),
-        ("Gemini", lambda: get_gemini_response(user_message))
+        ("Gemini", lambda: get_gemini_response(user_message, lang=lang))
     ]
     for name, fn in provider_chain:
         try:

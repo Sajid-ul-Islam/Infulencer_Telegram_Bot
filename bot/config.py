@@ -25,6 +25,11 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 TIMEZONE_STR = os.getenv("TIMEZONE", "UTC")
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "admin")
 
+RATE_LIMIT_DAILY = int(os.getenv("RATE_LIMIT_DAILY", "50"))
+RATE_LIMIT_VOICE_DAILY = int(os.getenv("RATE_LIMIT_VOICE_DAILY", "20"))
+INLINE_MAX_RESULTS = int(os.getenv("INLINE_MAX_RESULTS", "10"))
+
+CHROMADB_PATH = os.getenv("CHROMADB_PATH", "./chroma_db")
 
 try:
     BOT_TZ = ZoneInfo(TIMEZONE_STR)

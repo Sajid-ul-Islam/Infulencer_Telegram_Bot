@@ -1,10 +1,10 @@
 import datetime
 from telegram import Update, BotCommand
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, InlineQueryHandler
 from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ
 from bot.database import load_faqs
 from bot.server import start_server_threads
-from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, greeting_post
+from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, greeting_post, weekly_digest
 from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses
 from bot.handlers.commands import (
     start, socials_command, latest, youtube, medium, substack,
@@ -16,7 +16,8 @@ from bot.handlers.admin import (
     listfaq_command,     stats_command,     ingest_kb_command, ingest_duas_command, ingest_quran_kb_command, suggest_command,
     listsuggestions_command, startgiveaway_command, pickwinner_command
 )
-from bot.handlers.messages import handle_message, welcome_new_members, button_callback_handler
+from bot.handlers.messages import handle_message, welcome_new_members, button_callback_handler, handle_voice
+from bot.handlers.inline import inline_query
 
 async def post_init(application: Application):
     commands = [
@@ -90,9 +91,12 @@ def main():
     application.add_handler(CommandHandler("startgiveaway", startgiveaway_command))
     application.add_handler(CommandHandler("pickwinner", pickwinner_command))
 
+    application.add_handler(InlineQueryHandler(inline_query))
+
     application.add_handler(CallbackQueryHandler(button_callback_handler))
 
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members))
+    application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     job_queue = application.job_queue
@@ -100,6 +104,7 @@ def main():
     job_queue.run_daily(auto_post_medium, time=datetime.time(18, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
     job_queue.run_daily(auto_post_substack, time=datetime.time(14, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
     job_queue.run_daily(greeting_post, time=datetime.time(8, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
+    job_queue.run_weekly(weekly_digest, day_of_week=6, time=datetime.time(12, 0, tzinfo=BOT_TZ))
 
     logger.info("Bot started successfully!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

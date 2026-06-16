@@ -4,6 +4,29 @@ import feedparser
 from telegram import InlineKeyboardButton
 from bot.config import logger, YOUTUBE_CHANNEL_ID, YOUTUBE_LINK, MEDIUM_USERNAME, MEDIUM_LINK, SUBSTACK_URL
 
+async def extract_article_text(url: str) -> str:
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            response = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            response.raise_for_status()
+            content = response.text
+    except Exception as e:
+        logger.error(f"extract_article_text fetch error: {e}")
+        return f"Failed to fetch {url}: {e}"
+    import re
+    content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL)
+    content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL)
+    content = re.sub(r'<nav[^>]*>.*?</nav>', '', content, flags=re.DOTALL)
+    content = re.sub(r'<footer[^>]*>.*?</footer>', '', content, flags=re.DOTALL)
+    content = re.sub(r'<header[^>]*>.*?</header>', '', content, flags=re.DOTALL)
+    content = re.sub(r'<[^>]+>', '', content)
+    content = re.sub(r'\s+', ' ', content).strip()
+    lines = [line.strip() for line in content.split('\n') if line.strip()]
+    text = '\n'.join(lines)
+    if len(text) > 3000:
+        text = text[:3000] + "..."
+    return text or f"No readable content found at {url}"
+
 async def get_youtube_posts(limit=3, return_url_only=False):
     """Fetch latest YouTube videos"""
     try:

@@ -93,6 +93,127 @@ def save_feedback(user_id: int, username: str, feedback_type: str, message_id: i
     except Exception as e:
         logger.error(f"Error saving feedback: {e}")
 
+def check_usage(user_id: int, usage_type: str = "ai_calls", limit: int = 50) -> tuple[bool, int]:
+    if not db:
+        return True, limit
+    try:
+        import datetime
+        from google.cloud import firestore as gf
+        ref = db.collection("usage").document(f"{user_id}_{usage_type}")
+        now = datetime.datetime.utcnow()
+        doc = ref.get()
+        if doc.exists:
+            data = doc.to_dict()
+            count = data.get("count", 0)
+            reset_at = data.get("reset_at")
+            if reset_at and reset_at < now:
+                count = 0
+                ref.set({"count": 0, "reset_at": now + datetime.timedelta(hours=24)})
+            if count >= limit:
+                return False, limit - count
+            return True, limit - count
+        ref.set({
+            "count": 0, "reset_at": now + datetime.timedelta(hours=24),
+            "user_id": user_id, "type": usage_type
+        })
+        return True, limit
+    except Exception as e:
+        logger.error(f"check_usage error: {e}")
+        return True, limit
+
+def increment_usage(user_id: int, usage_type: str = "ai_calls"):
+    if not db:
+        return
+    try:
+        from google.cloud import firestore as gf
+        import datetime
+        ref = db.collection("usage").document(f"{user_id}_{usage_type}")
+        now = datetime.datetime.utcnow()
+        doc = ref.get()
+        if doc.exists:
+            data = doc.to_dict()
+            reset_at = data.get("reset_at")
+            if reset_at and reset_at < now:
+                ref.set({"count": 1, "reset_at": now + datetime.timedelta(hours=24)})
+            else:
+                ref.update({"count": gf.Increment(1)})
+        else:
+            ref.set({
+                "count": 1, "reset_at": now + datetime.timedelta(hours=24),
+                "user_id": user_id, "type": usage_type
+            })
+    except Exception as e:
+        logger.error(f"increment_usage error: {e}")
+
+def get_trending_searches(limit: int = 10) -> list[dict]:
+    if not db:
+        return []
+    try:
+        docs = db.collection("activity_logs").order_by("timestamp", direction="DESCENDING").limit(500).stream()
+        cmd_counts = {}
+        for doc in docs:
+            d = doc.to_dict()
+            cmd = d.get("command", "")
+            if cmd:
+                cmd_counts[cmd] = cmd_counts.get(cmd, 0) + 1
+        sorted_cmds = sorted(cmd_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+        return [{"command": cmd, "count": count} for cmd, count in sorted_cmds]
+    except Exception as e:
+        logger.error(f"get_trending_searches error: {e}")
+        return []
+
+def get_token_usage_stats() -> dict:
+    if not db:
+        return {"total_tokens": 0, "by_provider": {}, "total_cost": 0}
+    try:
+        docs = db.collection("token_usage").stream()
+        total = 0
+        by_provider = {}
+        total_cost = 0
+        for doc in docs:
+            d = doc.to_dict()
+            tokens = d.get("tokens", 0)
+            total += tokens
+            cost = d.get("cost", 0)
+            total_cost += cost
+            provider = d.get("provider", "unknown")
+            by_provider[provider] = by_provider.get(provider, 0) + tokens
+        return {
+            "total_tokens": total,
+            "by_provider": by_provider,
+            "total_cost": round(total_cost, 4)
+        }
+    except Exception as e:
+        logger.error(f"get_token_usage_stats error: {e}")
+        return {"total_tokens": 0, "by_provider": {}, "total_cost": 0}
+
+def get_user_retention_stats() -> dict:
+    if not db:
+        return {"total_users": 0, "active_7d": 0, "active_30d": 0}
+    try:
+        import datetime
+        users = list(db.collection("users").stream())
+        total = len(users)
+        now = datetime.datetime.utcnow()
+        active_7d = 0
+        active_30d = 0
+        for user_doc in users:
+            d = user_doc.to_dict()
+            last = d.get("last_active")
+            if last:
+                if (now - last).days < 7:
+                    active_7d += 1
+                if (now - last).days < 30:
+                    active_30d += 1
+        return {
+            "total_users": total,
+            "active_7d": active_7d,
+            "active_30d": active_30d
+        }
+    except Exception as e:
+        logger.error(f"get_user_retention_stats error: {e}")
+        return {"total_users": 0, "active_7d": 0, "active_30d": 0}
+
 def get_feedback_counts() -> dict:
     if not db:
         return {"positive": 0, "negative": 0, "total": 0}

@@ -16,15 +16,8 @@ from bot.config import (
     TELEGRAM_TOKEN,
     CHANNEL_ID,
     GROUP_ID,
-    YOUTUBE_LINK,
-    MEDIUM_LINK,
-    SUBSTACK_URL,
-    INSTAGRAM_LINK,
-    TWITTER_LINK,
-    FACEBOOK_LINK
 )
-from bot.database import FAQ, save_faq, remove_faq, db, get_feedback_counts
-from bot.vectordb import get_document_count
+from bot.database import FAQ, save_faq, remove_faq, db, get_feedback_counts, get_trending_searches, get_token_usage_stats, get_user_retention_stats
 from bot.pipeline import get_pipeline_stats
 
 # Global start time for uptime calculation
@@ -1054,6 +1047,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
+            <div class="grid-2col" style="margin-top: 24px;">
+                <div class="card glass">
+                    <div class="card-title">🔥 Trending Searches</div>
+                    <div id="trending-container" style="display: flex; flex-direction: column; gap: 8px;">
+                        <div class="no-data">Loading...</div>
+                    </div>
+                </div>
+                <div class="card glass">
+                    <div class="card-title">💰 Token Usage by Provider</div>
+                    <div id="token-container" style="display: flex; flex-direction: column; gap: 8px;">
+                        <div class="no-data">Loading...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="grid-2col" style="margin-top: 24px;">
+                <div class="card glass">
+                    <div class="card-title">👤 User Retention</div>
+                    <div id="retention-container" style="display: flex; flex-direction: column; gap: 12px;">
+                        <div class="no-data">Loading...</div>
+                    </div>
+                </div>
+            </div>
             <div class="card glass" style="margin-top: 24px;">
                 <div class="card-title">⏱️ Live Command Click Stream</div>
                 <div class="table-container" style="max-height: 400px; overflow-y: auto;">
@@ -1502,6 +1517,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 });
             }
 
+            refreshTrending();
+            refreshTokens();
+            refreshRetention();
+
             // 3. Render popularity metrics
             const statsGrid = document.getElementById('analytics-stats-grid');
             statsGrid.innerHTML = '';
@@ -1587,6 +1606,96 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         function closeUserModal() {
             document.getElementById('user-modal').style.display = 'none';
+        }
+
+        async function refreshTrending() {
+            const data = await fetchAPI('/api/analytics/trending');
+            const container = document.getElementById('trending-container');
+            container.innerHTML = '';
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div class="no-data">No trending searches yet</div>';
+                return;
+            }
+            const maxCount = data[0].count;
+            data.forEach(item => {
+                const pct = (item.count / maxCount) * 100;
+                const row = document.createElement('div');
+                row.style.display = 'flex';
+                row.style.alignItems = 'center';
+                row.style.gap = '10px';
+                row.innerHTML = `
+                    <span style="flex: 0 0 100px; font-size: 13px; color: var(--text-secondary);">/${escapeHTML(item.command)}</span>
+                    <div style="flex: 1; height: 24px; background: rgba(255,255,255,0.05); border-radius: 6px; overflow: hidden;">
+                        <div style="height: 100%; width: ${pct}%; background: linear-gradient(90deg, var(--primary), var(--purple)); border-radius: 6px; display: flex; align-items: center; padding-left: 8px;">
+                            <span style="font-size: 12px; font-weight: 600; color: white;">${item.count}</span>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        async function refreshTokens() {
+            const data = await fetchAPI('/api/analytics/tokens');
+            const container = document.getElementById('token-container');
+            container.innerHTML = '';
+            if (!data) {
+                container.innerHTML = '<div class="no-data">No token data</div>';
+                return;
+            }
+            const byProvider = data.by_provider || {};
+            const providers = Object.keys(byProvider);
+            if (providers.length === 0) {
+                container.innerHTML = `<div class="no-data">Total: ${data.total_tokens} tokens | Cost: $${data.total_cost}</div>`;
+                return;
+            }
+            const maxVal = Math.max(...Object.values(byProvider));
+            providers.forEach(provider => {
+                const pct = (byProvider[provider] / maxVal) * 100;
+                const row = document.createElement('div');
+                row.style.display = 'flex';
+                row.style.alignItems = 'center';
+                row.style.gap = '10px';
+                row.innerHTML = `
+                    <span style="flex: 0 0 80px; font-size: 13px; color: var(--text-secondary);">${escapeHTML(provider)}</span>
+                    <div style="flex: 1; height: 22px; background: rgba(255,255,255,0.05); border-radius: 6px; overflow: hidden;">
+                        <div style="height: 100%; width: ${pct}%; background: linear-gradient(90deg, var(--success), #059669); border-radius: 6px; display: flex; align-items: center; padding-left: 8px;">
+                            <span style="font-size: 11px; font-weight: 600; color: white;">${byProvider[provider].toLocaleString()}</span>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(row);
+            });
+            container.innerHTML += `<div style="margin-top: 8px; font-size: 13px; color: var(--text-secondary);">Total: ${data.total_tokens.toLocaleString()} tokens | Cost: $${data.total_cost}</div>`;
+        }
+
+        async function refreshRetention() {
+            const data = await fetchAPI('/api/analytics/retention');
+            const container = document.getElementById('retention-container');
+            container.innerHTML = '';
+            if (!data) {
+                container.innerHTML = '<div class="no-data">No retention data</div>';
+                return;
+            }
+            const stats = [
+                { label: 'Total Users', value: data.total_users, pct: 100 },
+                { label: 'Active (7d)', value: data.active_7d, pct: data.total_users > 0 ? (data.active_7d / data.total_users * 100) : 0 },
+                { label: 'Active (30d)', value: data.active_30d, pct: data.total_users > 0 ? (data.active_30d / data.total_users * 100) : 0 },
+            ];
+            stats.forEach(s => {
+                const row = document.createElement('div');
+                row.style.display = 'flex';
+                row.style.alignItems = 'center';
+                row.style.justifyContent = 'space-between';
+                row.style.padding = '12px 16px';
+                row.style.background = 'rgba(255,255,255,0.03)';
+                row.style.borderRadius = '8px';
+                row.innerHTML = `
+                    <span style="font-size: 14px; color: var(--text-secondary);">${s.label}</span>
+                    <span style="font-size: 20px; font-weight: 700; color: var(--primary);">${s.value} <span style="font-size: 13px; color: var(--text-secondary);">(${s.pct.toFixed(1)}%)</span></span>
+                `;
+                container.appendChild(row);
+            });
         }
 
         // Refresh FAQ list
@@ -2076,6 +2185,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         elif path == '/api/logs':
             self.send_json(200, list(memory_log_handler.logs))
+
+        elif path == '/api/analytics/trending':
+            self.send_json(200, get_trending_searches())
+
+        elif path == '/api/analytics/tokens':
+            self.send_json(200, get_token_usage_stats())
+
+        elif path == '/api/analytics/retention':
+            self.send_json(200, get_user_retention_stats())
 
         else:
             self.send_json(404, {"error": "Endpoint not found"})

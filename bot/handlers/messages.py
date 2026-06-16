@@ -1,11 +1,14 @@
+import os
+import tempfile
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ChatAction
 from firebase_admin import firestore
-from bot.config import logger, is_admin
-from bot.database import db, track_activity, save_feedback
+from bot.config import logger, is_admin, RATE_LIMIT_VOICE_DAILY
+from bot.database import db, track_activity, save_feedback, check_usage, increment_usage
 from bot.ai import get_ai_response, get_faq_response
 from bot.handlers.feedback import FEEDBACK_POSITIVE, FEEDBACK_NEGATIVE
+from bot.transcriber import transcribe_voice
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
@@ -75,6 +78,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if response:
         await update.message.reply_text(response, parse_mode="HTML", reply_to_message_id=update.message.message_id)
         logger.info(f"Answered question from {user_id}: {user_message[:50]}")
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.voice:
+        return
+    user_id = update.effective_user.id
+    username = update.effective_user.first_name
+
+    allowed, remaining = check_usage(user_id, "voice_transcriptions", RATE_LIMIT_VOICE_DAILY)
+    if not allowed:
+        await update.message.reply_text(
+            f"You've reached today's voice transcription limit ({RATE_LIMIT_VOICE_DAILY}). Try again tomorrow."
+        )
+        return
+
+    await update.message.chat.send_action(ChatAction.TYPING)
+    file = await context.bot.get_file(update.message.voice.file_id)
+    suffix = ".ogg"
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            await file.download_to_drive(tmp.name)
+            tmp_path = tmp.name
+        text = await transcribe_voice(tmp_path)
+        os.unlink(tmp_path)
+    except Exception as e:
+        logger.error(f"Voice transcription error: {e}")
+        await update.message.reply_text("Sorry, I couldn't transcribe that voice message.")
+        return
+
+    if not text:
+        await update.message.reply_text("Sorry, I couldn't understand the voice message.")
+        return
+
+    increment_usage(user_id, "voice_transcriptions")
+    track_activity(user_id, username, "voice_message")
+
+    response = await get_ai_response(text, user_id=user_id)
+    if response:
+        await update.message.reply_text(f"🎤 <i>Transcribed:</i> {text}\n\n{response}", parse_mode="HTML")
+    else:
+        await update.message.reply_text(f"🎤 Transcribed: {text}", parse_mode="HTML")
 
 async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for member in update.message.new_chat_members:
