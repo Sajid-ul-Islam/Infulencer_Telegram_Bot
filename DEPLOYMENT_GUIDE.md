@@ -32,7 +32,8 @@ mkdir telegram-content-bot
 cd telegram-content-bot
 
 # Copy files:
-# - telegram_bot.py
+# - main.py
+# - bot/
 # - requirements.txt
 # - .env (filled with your values)
 # - .gitignore
@@ -67,7 +68,7 @@ git push -u origin main
    - **Name:** `telegram-content-bot`
    - **Environment:** `Python 3`
    - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `python telegram_bot.py`
+   - **Start Command:** `python main.py`
    - **Instance Type:** Free (or Starter for better reliability)
 
 5. Add Environment Variables:
@@ -87,7 +88,7 @@ git push -u origin main
 
 ### 1. Update Your Platform Links
 
-Open `telegram_bot.py` and find this section:
+Open `.env` (or `bot/config.py` default fallbacks) and find this section:
 
 ```python
 # Your content platforms (update with your actual URLs)
@@ -273,5 +274,5 @@ Questions? Check Render logs or test locally first:
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
-python telegram_bot.py
+python main.py
 ```

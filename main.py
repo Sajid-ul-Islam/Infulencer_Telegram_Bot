@@ -54,17 +54,20 @@ async def post_init(application: Application):
         BotCommand("help", "Show all commands"),
         BotCommand("ask", "Ask me anything (with memory)"),
         BotCommand("latest", "Get all latest content"),
-        BotCommand("youtube", "Latest YouTube video"),
-        BotCommand("medium", "Latest Medium article"),
-        BotCommand("substack", "Latest Substack newsletter"),
+        BotCommand("youtube", "Latest video"),
+        BotCommand("medium", "Latest article"),
+        BotCommand("substack", "Latest newsletter"),
         BotCommand("quran", "Search Quran verses"),
         BotCommand("dua", "Search Hisnul Muslim duas"),
         BotCommand("socials", "Links to all my platforms"),
         BotCommand("suggest", "Suggest a topic idea"),
         BotCommand("forget", "Clear conversation history"),
     ]
-    await application.bot.set_my_commands(commands)
-    logger.info("Bot commands menu updated.")
+    try:
+        await application.bot.set_my_commands(commands)
+        logger.info("Bot commands menu updated.")
+    except Exception as e:
+        logger.error(f"Failed to set bot commands menu (non-blocking): {e}")
     asyncio.create_task(background_init(application))
 
 def main():
