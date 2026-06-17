@@ -1,8 +1,8 @@
 import datetime
 import asyncio
-from telegram import Update, BotCommand
+from telegram import Update, BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeChat
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, InlineQueryHandler
-from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ
+from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ, ADMIN_ID
 from bot.database import load_faqs
 from bot.server import start_server_threads
 from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, greeting_post, weekly_digest
@@ -64,10 +64,36 @@ async def post_init(application: Application):
         BotCommand("forget", "Clear conversation history"),
     ]
     try:
-        await application.bot.set_my_commands(commands)
-        logger.info("Bot commands menu updated.")
+        await application.bot.set_my_commands(commands, scope=BotCommandScopeDefault())
+        await application.bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
+        await application.bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
+        logger.info("Bot commands menu updated for default, private, and group scopes.")
     except Exception as e:
         logger.error(f"Failed to set bot commands menu (non-blocking): {e}")
+
+    # Set up custom admin commands menu if ADMIN_ID is set
+    if ADMIN_ID and str(ADMIN_ID).strip().isdigit():
+        admin_commands = [
+            BotCommand("stats", "Show admin stats"),
+            BotCommand("questions", "List recent user questions"),
+            BotCommand("listsuggestions", "List geopolitics topic suggestions"),
+            BotCommand("postlatest", "Broadcast latest posts from platforms"),
+            BotCommand("broadcast", "Send a message to group & channel"),
+            BotCommand("addfaq", "Add a new custom FAQ"),
+            BotCommand("rmfaq", "Remove a custom FAQ"),
+            BotCommand("listfaq", "List all custom FAQs"),
+            BotCommand("ingestkb", "Re-index creator knowledge base"),
+            BotCommand("ingestduas", "Re-index Hisnul Muslim duas"),
+            BotCommand("ingestquran", "Re-index Quran verses"),
+            BotCommand("startgiveaway", "Start a giveaway"),
+            BotCommand("pickwinner", "Pick giveaway winner"),
+        ]
+        try:
+            await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=int(ADMIN_ID)))
+            logger.info("Admin bot commands menu updated for admin chat.")
+        except Exception as e:
+            logger.warning(f"Failed to set admin commands menu: {e}")
+
     asyncio.create_task(background_init(application))
 
 def main():

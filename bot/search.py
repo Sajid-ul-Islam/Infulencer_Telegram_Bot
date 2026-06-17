@@ -1,16 +1,19 @@
 import re
+from typing import List, Dict, Tuple, Optional, Any
 from rank_bm25 import BM25Okapi
 from bot.vectordb import search_vector, build_bm25_corpus
 from bot.config import logger
 
-_bm25_index = None
-_bm25_docs = []
-_bm25_metadatas = []
+_bm25_index: Optional[BM25Okapi] = None
+_bm25_docs: List[str] = []
+_bm25_metadatas: List[Dict[str, Any]] = []
 
-def _tokenize(text: str) -> list[str]:
+def _tokenize(text: str) -> List[str]:
+    """Tokenizes input text into a list of lowercase alphanumeric words."""
     return re.findall(r'\w+', text.lower())
 
-def _rebuild_bm25():
+def _rebuild_bm25() -> None:
+    """Builds the BM25 index corpus from vector database records."""
     global _bm25_index, _bm25_docs, _bm25_metadatas
     docs, metadatas = build_bm25_corpus()
     if docs:
@@ -23,7 +26,8 @@ def _rebuild_bm25():
         _bm25_docs = []
         _bm25_metadatas = []
 
-def search_bm25(query: str, n_results: int = 5) -> list[dict]:
+def search_bm25(query: str, n_results: int = 5) -> List[Dict[str, Any]]:
+    """Performs exact BM25 keyword matching search over the corpus."""
     if _bm25_index is None:
         _rebuild_bm25()
     if _bm25_index is None:
@@ -42,7 +46,8 @@ def search_bm25(query: str, n_results: int = 5) -> list[dict]:
             })
     return hits
 
-def hybrid_search(query: str, n_results: int = 5, alpha: float = 0.5) -> list[dict]:
+def hybrid_search(query: str, n_results: int = 5, alpha: float = 0.5) -> List[Dict[str, Any]]:
+    """Combines vector search and BM25 search scores into a single ranked list."""
     vector_hits = search_vector(query, n_results=n_results * 2)
     bm25_hits = search_bm25(query, n_results=n_results * 2)
     combined = {}
@@ -63,7 +68,8 @@ def hybrid_search(query: str, n_results: int = 5, alpha: float = 0.5) -> list[di
     rescored.sort(key=lambda x: x["score"], reverse=True)
     return rescored[:n_results]
 
-def rerank(query: str, hits: list[dict], top_n: int = 3) -> list[dict]:
+def rerank(query: str, hits: List[Dict[str, Any]], top_n: int = 3) -> List[Dict[str, Any]]:
+    """Reranks search results using a cross-encoder model for improved accuracy."""
     if not hits:
         return []
     try:
@@ -79,6 +85,7 @@ def rerank(query: str, hits: list[dict], top_n: int = 3) -> list[dict]:
     return hits[:top_n]
 
 def search_pipeline(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
+    """Executes the hybrid search and reranking query pipeline for past content."""
     hits = hybrid_search(query, n_results=n_results)
     if not hits:
         return "No relevant past content found for this query."
@@ -96,10 +103,11 @@ def search_pipeline(query: str, n_results: int = 5, use_rerank: bool = True) -> 
     return "\n\n---\n\n".join(formatted)
 
 def search_duas(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
+    """Executes the RAG search pipeline scoped for Hisnul Muslim duas."""
     hits = search_vector(query, n_results=n_results * 2, where={"type": "dua"})
     if not hits:
         bm25_hits = search_bm25(query, n_results=n_results * 2)
-        hits = [h for h in bm25_hits if h.get("metadata", {}).get("type") == "dua"]
+        hits = [h for h in bm25_hits if h.get("metadata", {}) and h.get("metadata", {}).get("type") == "dua"]
     if not hits:
         return "No relevant duas found for this query."
     if use_rerank and len(hits) > 1:
@@ -111,20 +119,21 @@ def search_duas(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
         category = meta.get("category", "")
         formatted.append(
             f"Dua: {dua_name}\n"
-            f"Category: {category}\n"
-            f"Arabic: {meta.get('arabic', '')}\n"
-            f"Transliteration: {meta.get('transliteration', '')}\n"
-            f"Translation: {meta.get('translation', '')}\n"
+            f"Category: {category}\n\n"
+            f"Arabic:\n{meta.get('arabic', '')}\n\n"
+            f"Transliteration:\n{meta.get('transliteration', '')}\n\n"
+            f"Translation:\n{meta.get('translation', '')}\n\n"
             f"Source: {meta.get('reference', '')}\n"
             f"URL: {meta.get('url', '')}"
         )
     return "\n\n---\n\n".join(formatted)
 
 def search_quran(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
+    """Executes the RAG search pipeline scoped for Quran verses."""
     hits = search_vector(query, n_results=n_results * 2, where={"type": "quran"})
     if not hits:
         bm25_hits = search_bm25(query, n_results=n_results * 2)
-        hits = [h for h in bm25_hits if h.get("metadata", {}).get("type") == "quran"]
+        hits = [h for h in bm25_hits if h.get("metadata", {}) and h.get("metadata", {}).get("type") == "quran"]
     if not hits:
         return "No relevant Quran verses found for this query."
     if use_rerank and len(hits) > 1:
@@ -141,5 +150,6 @@ def search_quran(query: str, n_results: int = 5, use_rerank: bool = True) -> str
         )
     return "\n\n---\n\n".join(formatted)
 
-def rebuild_bm25_index():
+def rebuild_bm25_index() -> None:
+    """Public proxy function to trigger BM25 rebuild."""
     _rebuild_bm25()

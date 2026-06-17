@@ -8,8 +8,11 @@ from bot.database import db, FAQ, save_faq, remove_faq, track_activity, get_feed
 from bot.jobs import send_channel_message, auto_post_youtube, auto_post_medium, auto_post_substack
 from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses, get_pipeline_stats
 from bot.vectordb import get_document_count
+from bot.handlers.commands import clean_command_query
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         return
     
@@ -27,6 +30,8 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Failed to ban user: {e}")
 
 async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         return
     
@@ -48,6 +53,8 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Failed to mute user: {e}")
 
 async def postlatest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission to use this command.")
         return
@@ -59,6 +66,8 @@ async def postlatest_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("✅ Done!")
 
 async def questions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission to use this command.")
         return
@@ -88,12 +97,14 @@ async def questions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Error retrieving questions.")
 
 async def poll_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission to use this command.")
         return
 
     try:
-        args = shlex.split(update.message.text)[1:]
+        args = shlex.split(clean_command_query(update.message.text, "poll"))
         if len(args) < 3:
             await update.message.reply_text("Usage: /poll \"Question\" \"Option 1\" \"Option 2\" ...")
             return
@@ -118,11 +129,13 @@ async def poll_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error sending poll: {e}")
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission to use this command.")
         return
 
-    text = update.message.text.replace("/broadcast", "", 1).strip()
+    text = clean_command_query(update.message.text, "broadcast")
     if not text:
         await update.message.reply_text("Usage: /broadcast <message>")
         return
@@ -131,12 +144,14 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Broadcast sent!")
 
 async def addfaq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission to use this command.")
         return
 
     try:
-        args = shlex.split(update.message.text)[1:]
+        args = shlex.split(clean_command_query(update.message.text, "addfaq"))
         if len(args) < 2:
             await update.message.reply_text("Usage: /addfaq \"keyword or phrase\" \"Response text\"")
             return
@@ -148,12 +163,14 @@ async def addfaq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Invalid format. Use quotes around keyword and response.")
 
 async def rmfaq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission to use this command.")
         return
 
     try:
-        args = shlex.split(update.message.text)[1:]
+        args = shlex.split(clean_command_query(update.message.text, "rmfaq"))
         if len(args) < 1:
             await update.message.reply_text("Usage: /rmfaq \"keyword\"")
             return
@@ -164,6 +181,8 @@ async def rmfaq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Invalid format.")
 
 async def listfaq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission to use this command.")
         return
@@ -178,6 +197,8 @@ async def listfaq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="HTML")
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission.")
         return
@@ -216,6 +237,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(stats, parse_mode="HTML")
 
 async def ingest_kb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission to use this command.")
         return
@@ -230,6 +253,8 @@ async def ingest_kb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def ingest_duas_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission to use this command.")
         return
@@ -241,6 +266,8 @@ async def ingest_duas_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 async def ingest_quran_kb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission to use this command.")
         return
@@ -252,8 +279,10 @@ async def ingest_quran_kb_command(update: Update, context: ContextTypes.DEFAULT_
     )
 
 async def suggest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     track_activity(update.effective_user.id, update.effective_user.first_name, "suggest")
-    suggestion = update.message.text.replace("/suggest", "", 1).strip()
+    suggestion = clean_command_query(update.message.text, "suggest")
     if not suggestion:
         await update.message.reply_text(
             "💡 <b>Suggestion Box</b>\n\n"
@@ -279,6 +308,8 @@ async def suggest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Database is currently disabled.")
 
 async def listsuggestions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission.")
         return
@@ -306,11 +337,13 @@ async def listsuggestions_command(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("Error retrieving suggestions.")
 
 async def startgiveaway_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission.")
         return
 
-    prize = update.message.text.replace("/startgiveaway", "", 1).strip()
+    prize = clean_command_query(update.message.text, "startgiveaway")
     if not prize:
         await update.message.reply_text("Usage: /startgiveaway <Prize Name>")
         return
@@ -339,6 +372,8 @@ async def startgiveaway_command(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(message, parse_mode="HTML", reply_markup=reply_markup)
 
 async def pickwinner_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ You don't have permission.")
         return

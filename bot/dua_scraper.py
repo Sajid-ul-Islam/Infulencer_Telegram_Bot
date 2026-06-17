@@ -136,7 +136,7 @@ async def get_dua_stats() -> dict:
         collection = client.get_collection("knowledge_base")
         all_docs = collection.get(include=["metadatas"])
         if all_docs and all_docs["metadatas"]:
-            dua_count = sum(1 for m in all_docs["metadatas"] if m.get("type") == "dua")
+            dua_count = sum(1 for m in all_docs["metadatas"] if m and m.get("type") == "dua")
     except Exception:
         pass
     return {"indexed_duas": dua_count}
@@ -152,7 +152,7 @@ async def ingest_all_duas(force_reindex: bool = False, progress_callback=None) -
         collection = get_collection()
         existing = collection.get(include=["metadatas"])
         if existing and existing["ids"]:
-            dua_ids_to_delete = [existing["ids"][i] for i, m in enumerate(existing["metadatas"]) if m.get("type") == "dua"]
+            dua_ids_to_delete = [existing["ids"][i] for i, m in enumerate(existing["metadatas"]) if m and m.get("type") == "dua"]
             if dua_ids_to_delete:
                 for i in range(0, len(dua_ids_to_delete), 100):
                     batch = dua_ids_to_delete[i:i+100]

@@ -1,23 +1,27 @@
 import json
 import httpx
+import asyncio
+from abc import ABC, abstractmethod
+from typing import List, Dict, Optional, Any
+
 from bot.config import (
     logger, XAI_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY,
     GROQ_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY,
     OLLAMA_BASE_URL, OLLAMA_MODEL,
     YOUTUBE_LINK, MEDIUM_LINK, INSTAGRAM_LINK, TWITTER_LINK, FACEBOOK_LINK
 )
-from bot.database import FAQ
+from bot.database import FAQ, track_token_usage
 from bot.search import search_pipeline, search_duas, search_quran
 from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts, extract_article_text
 from bot.memory import get_history, add_to_history
 from bot.vectordb import get_document_count
 
-LANG_PROMPTS = {
+LANG_PROMPTS: Dict[str, str] = {
     "en": "You are the official Telegram assistant for Bearded Bangali, a tech and lifestyle content creator. Answer in English.",
     "bn": "আপনি হলেন Bearded Bangali-এর অফিসিয়াল টেলিগ্রাম অ্যাসিস্ট্যান্ট। দয়া করে বাংলায় উত্তর দিন।",
 }
 
-TOOLS = [
+TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -123,7 +127,7 @@ TOOLS = [
     }
 ]
 
-def get_system_prompt(user_id: int = None, lang: str = "en") -> str:
+def get_system_prompt(user_id: Optional[int] = None, lang: str = "en") -> str:
     faq_context = json.dumps(FAQ, indent=2)
     doc_count = get_document_count()
     base = f"""
@@ -196,9 +200,7 @@ async def execute_tool(tool_name: str, arguments: dict) -> str:
         return msg or f"No recent {platform} content found."
     return f"Unknown tool: {tool_name}"
 
-async def call_agent_with_tools(api_key: str, base_url: str, model: str, messages: list, max_tool_rounds: int = 3) -> str:
-    if not api_key:
-        return None
+async def call_agent_with_tools(api_key: str, base_url: str, model: str, messages: list, max_tool_rounds: int = 3, user_id: Optional[int] = None, provider: str = "AI") -> Optional[str]:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -218,7 +220,14 @@ async def call_agent_with_tools(api_key: str, base_url: str, model: str, message
             async with httpx.AsyncClient(timeout=20.0) as client:
                 response = await client.post(base_url, headers=headers, json=payload)
                 response.raise_for_status()
-                message = response.json()["choices"][0]["message"]
+                data = response.json()
+                message = data["choices"][0]["message"]
+                
+                usage = data.get("usage", {})
+                tokens = usage.get("total_tokens", 0)
+                if user_id and tokens > 0:
+                    asyncio.create_task(track_token_usage(user_id, provider, tokens, tokens * 0.0000005))
+                
                 if not message.get("tool_calls"):
                     return message.get("content", "")
                 messages.append({
@@ -248,20 +257,25 @@ async def call_agent_with_tools(api_key: str, base_url: str, model: str, message
             payload.pop("tool_choice", None)
             final_response = await client.post(base_url, headers=headers, json=payload)
             final_response.raise_for_status()
-            return final_response.json()["choices"][0]["message"]["content"]
+            final_data = final_response.json()
+            
+            usage = final_data.get("usage", {})
+            tokens = usage.get("total_tokens", 0)
+            if user_id and tokens > 0:
+                asyncio.create_task(track_token_usage(user_id, provider, tokens, tokens * 0.0000005))
+                
+            return final_data["choices"][0]["message"]["content"]
     except Exception as e:
         logger.error(f"Error in final agent call ({base_url}): {e}")
         return None
 
-async def call_openai_compatible(api_key: str, base_url: str, model: str, user_message: str, use_tools: bool = True) -> str:
-    if not api_key:
-        return None
-    messages = [
-        {"role": "system", "content": get_system_prompt().strip()},
+async def call_openai_compatible(api_key: str, base_url: str, model: str, user_message: str, system_prompt: str, use_tools: bool = True, user_id: Optional[int] = None, provider: str = "AI", messages: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
+    msgs = messages or [
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message}
     ]
     if use_tools:
-        return await call_agent_with_tools(api_key, base_url, model, messages)
+        return await call_agent_with_tools(api_key, base_url, model, msgs, user_id=user_id, provider=provider)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -270,7 +284,7 @@ async def call_openai_compatible(api_key: str, base_url: str, model: str, user_m
         headers["HTTP-Referer"] = "https://t.me/BeardedBangaliBot"
         headers["X-Title"] = "Bearded Bangali Bot"
     payload = {
-        "messages": messages,
+        "messages": msgs,
         "model": model,
         "temperature": 0.7
     }
@@ -278,130 +292,231 @@ async def call_openai_compatible(api_key: str, base_url: str, model: str, user_m
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(base_url, headers=headers, json=payload)
             response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
+            data = response.json()
+            
+            usage = data.get("usage", {})
+            tokens = usage.get("total_tokens", 0)
+            if user_id and tokens > 0:
+                asyncio.create_task(track_token_usage(user_id, provider, tokens, tokens * 0.0000005))
+                
+            return data["choices"][0]["message"]["content"]
     except Exception as e:
         logger.error(f"Error calling {base_url}: {e}")
         return None
 
-async def get_anthropic_response(user_message: str, lang: str = "en") -> str:
-    if not ANTHROPIC_API_KEY:
-        return None
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": ANTHROPIC_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                },
-                json={
-                    "model": "claude-3-haiku-20240307",
-                    "max_tokens": 300,
-                    "system": get_system_prompt(lang=lang).strip(),
-                    "messages": [{"role": "user", "content": user_message}]
+# ============ AI STRATEGY PROVIDERS ============
+
+class BaseAIProvider(ABC):
+    """Abstract Strategy interface defining standard API structure for cascading AI nodes."""
+    
+    def __init__(self, name: str, api_key: Optional[str], model: str):
+        self.name = name
+        self.api_key = api_key
+        self.model = model
+
+    @abstractmethod
+    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
+        """Core execution pipeline representing LLM call."""
+        pass
+
+class OpenRouterAIProvider(BaseAIProvider):
+    def __init__(self) -> None:
+        super().__init__("OpenRouter", OPENROUTER_API_KEY, "openai/gpt-4o-mini")
+        self.base_url = "https://openrouter.ai/api/v1/chat/completions"
+
+    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
+        if not self.api_key:
+            return None
+        msgs = messages or [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
+        return await call_agent_with_tools(self.api_key, self.base_url, self.model, msgs, user_id=user_id, provider=self.name)
+
+class OpenAIProvider(BaseAIProvider):
+    def __init__(self) -> None:
+        super().__init__("OpenAI", OPENAI_API_KEY, "gpt-4o-mini")
+        self.base_url = "https://api.openai.com/v1/chat/completions"
+
+    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
+        if not self.api_key:
+            return None
+        msgs = messages or [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
+        return await call_agent_with_tools(self.api_key, self.base_url, self.model, msgs, user_id=user_id, provider=self.name)
+
+class GroqAIProvider(BaseAIProvider):
+    def __init__(self) -> None:
+        super().__init__("Groq", GROQ_API_KEY, "llama-3.1-8b-instant")
+        self.base_url = "https://api.groq.com/openai/v1/chat/completions"
+
+    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
+        if not self.api_key:
+            return None
+        return await call_openai_compatible(self.api_key, self.base_url, self.model, user_message, system_prompt, use_tools=False, user_id=user_id, provider=self.name, messages=messages)
+
+class xAIProvider(BaseAIProvider):
+    def __init__(self) -> None:
+        super().__init__("xAI", XAI_API_KEY, "grok-beta")
+        self.base_url = "https://api.x.ai/v1/chat/completions"
+
+    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
+        if not self.api_key:
+            return None
+        return await call_openai_compatible(self.api_key, self.base_url, self.model, user_message, system_prompt, use_tools=True, user_id=user_id, provider=self.name, messages=messages)
+
+class AnthropicAIProvider(BaseAIProvider):
+    def __init__(self) -> None:
+        super().__init__("Anthropic", ANTHROPIC_API_KEY, "claude-3-haiku-20240307")
+
+    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
+        if not self.api_key:
+            return None
+        anthropic_messages = []
+        if messages:
+            for m in messages:
+                if m["role"] in ["user", "assistant"]:
+                    anthropic_messages.append({"role": m["role"], "content": m["content"]})
+        if not anthropic_messages:
+            anthropic_messages = [{"role": "user", "content": user_message}]
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": self.api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    },
+                    json={
+                        "model": self.model,
+                        "max_tokens": 300,
+                        "system": system_prompt,
+                        "messages": anthropic_messages
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                usage = data.get("usage", {})
+                tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+                if user_id and tokens > 0:
+                    asyncio.create_task(track_token_usage(user_id, self.name, tokens, tokens * 0.000001))
+                return data["content"][0]["text"]
+        except Exception as e:
+            logger.error(f"Error calling Anthropic API: {e}")
+            return None
+
+class GeminiAIProvider(BaseAIProvider):
+    def __init__(self) -> None:
+        super().__init__("Gemini", GEMINI_API_KEY, "gemini-1.5-flash")
+
+    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
+        if not self.api_key:
+            return None
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        gemini_contents = []
+        if messages:
+            for m in messages:
+                if m["role"] in ["user", "assistant"]:
+                    role = "user" if m["role"] == "user" else "model"
+                    gemini_contents.append({"role": role, "parts": [{"text": m["content"]}]})
+        if not gemini_contents:
+            gemini_contents = [{"role": "user", "parts": [{"text": user_message}]}]
+        payload = {
+            "system_instruction": {"parts": {"text": system_prompt}},
+            "contents": gemini_contents,
+            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 300}
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                usage = data.get("usageMetadata", {})
+                tokens = usage.get("totalTokenCount", 0)
+                if user_id and tokens > 0:
+                    asyncio.create_task(track_token_usage(user_id, self.name, tokens, tokens * 0.0000001))
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            logger.error(f"Error calling Gemini API: {e}")
+            return None
+
+class OllamaAIProvider(BaseAIProvider):
+    def __init__(self) -> None:
+        super().__init__("Ollama", "ollama_placeholder", OLLAMA_MODEL)
+        self.base_url = OLLAMA_BASE_URL.rstrip("/")
+
+    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
+        if not self.base_url:
+            return None
+        ollama_messages = messages or [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ]
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                payload = {
+                    "model": self.model,
+                    "messages": ollama_messages,
+                    "stream": False,
+                    "options": {"temperature": 0.7}
                 }
-            )
-            response.raise_for_status()
-            return response.json()["content"][0]["text"]
-    except Exception as e:
-        logger.error(f"Error calling Anthropic API: {e}")
-        return None
+                endpoint = f"{self.base_url}/v1/chat/completions" if "v1" not in self.base_url else f"{self.base_url}/chat/completions"
+                response = await client.post(endpoint, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                usage = data.get("usage", {})
+                tokens = usage.get("total_tokens", 0)
+                if not tokens:
+                    tokens = data.get("prompt_eval_count", 0) + data.get("eval_count", 0)
+                if user_id and tokens > 0:
+                    asyncio.create_task(track_token_usage(user_id, self.name, tokens, 0.0))
+                return data.get("message", {}).get("content") or data.get("response", "")
+        except Exception as e:
+            logger.warning(f"Ollama unavailable ({self.base_url}): {e}")
+            return None
 
-async def get_gemini_response(user_message: str, lang: str = "en") -> str:
-    if not GEMINI_API_KEY:
-        return None
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    payload = {
-        "system_instruction": {"parts": {"text": get_system_prompt(lang=lang).strip()}},
-        "contents": [{"role": "user", "parts": [{"text": user_message}]}],
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 300}
-    }
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            return response.json()["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e:
-        logger.error(f"Error calling Gemini API: {e}")
-        return None
-
-async def get_ollama_response(user_message: str, lang: str = "en") -> str:
-    base_url = OLLAMA_BASE_URL.rstrip("/")
-    if not base_url:
-        return None
-    system_prompt = get_system_prompt(lang=lang).strip()
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            payload = {
-                "model": OLLAMA_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                "stream": False,
-                "options": {"temperature": 0.7}
-            }
-            response = await client.post(f"{base_url}/v1/chat/completions" if "v1" not in base_url else f"{base_url}/chat/completions", json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("message", {}).get("content") or data.get("response", "")
-    except Exception as e:
-        logger.warning(f"Ollama unavailable ({base_url}): {e}")
-        return None
+# ============ EXPORTED ENGINE ACTIONS ============
 
 def _detect_lang(text: str) -> str:
     bengali_chars = sum(1 for c in text if ord(c) in range(0x0980, 0x09FF))
     return "bn" if bengali_chars > 3 else "en"
 
-async def get_ai_response(user_message: str, user_id: int = None, use_memory: bool = True) -> str:
+# Initialize strategy providers as module-level constants
+ALL_PROVIDERS: List[BaseAIProvider] = [
+    OpenRouterAIProvider(),
+    GroqAIProvider(),
+    OpenAIProvider(),
+    AnthropicAIProvider(),
+    xAIProvider(),
+    GeminiAIProvider(),
+    OllamaAIProvider()
+]
+
+ACTIVE_PROVIDERS: List[BaseAIProvider] = [
+    p for p in ALL_PROVIDERS if p.api_key or (p.name == "Ollama" and p.base_url)
+]
+
+async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_memory: bool = True) -> Optional[str]:
     lang = _detect_lang(user_message)
     system_prompt = get_system_prompt(user_id, lang=lang).strip()
+    messages = None
     if use_memory and user_id:
         history = get_history(user_id, max_exchanges=3)
         if history:
-            context_messages = [{"role": "system", "content": system_prompt}]
-            for msg in history:
-                context_messages.append(msg)
-            context_messages.append({"role": "user", "content": user_message})
-            messages = context_messages
-        else:
-            messages = None
-    else:
-        messages = None
-    provider_chain = [
-        ("OpenRouter", lambda: call_agent_with_tools(
-            OPENROUTER_API_KEY,
-            "https://openrouter.ai/api/v1/chat/completions",
-            "openai/gpt-4o-mini",
-            messages or [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
-        ) if OPENROUTER_API_KEY else None),
-        ("Groq", lambda: call_openai_compatible(GROQ_API_KEY, "https://api.groq.com/openai/v1/chat/completions", "llama-3.1-8b-instant", user_message, use_tools=False)),
-        ("OpenAI", lambda: call_agent_with_tools(
-            OPENAI_API_KEY,
-            "https://api.openai.com/v1/chat/completions",
-            "gpt-4o-mini",
-            messages or [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
-        ) if OPENAI_API_KEY else None),
-        ("Anthropic", lambda: get_anthropic_response(user_message, lang=lang)),
-        ("xAI", lambda: call_openai_compatible(XAI_API_KEY, "https://api.x.ai/v1/chat/completions", "grok-beta", user_message)),
-        ("Gemini", lambda: get_gemini_response(user_message, lang=lang)),
-        ("Ollama", lambda: get_ollama_response(user_message, lang=lang))
-    ]
-    for name, fn in provider_chain:
+            messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": user_message}]
+            
+    for provider in ACTIVE_PROVIDERS:
         try:
-            res = await fn()
+            res = await provider.generate_response(user_message, system_prompt, messages, user_id)
             if res:
                 if use_memory and user_id:
                     add_to_history(user_id, "user", user_message)
                     add_to_history(user_id, "assistant", res)
                 return res
-            logger.info(f"{name} failed or returned empty. Trying next...")
+            logger.info(f"{provider.name} failed or returned empty. Trying next...")
         except Exception as e:
-            logger.error(f"{name} errored: {e}")
+            logger.error(f"{provider.name} strategy error: {e}")
+            
     return None
 
-def get_faq_response(user_message: str) -> str:
+def get_faq_response(user_message: str) -> Optional[str]:
     user_message_lower = user_message.lower()
     if any(word in user_message_lower for word in ["salam", "assalam", "salam alaikum"]):
         return "Walikumus Salam! 😊\nHow can I help you today? Type /help to see what I can do."

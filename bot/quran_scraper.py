@@ -194,7 +194,7 @@ async def ingest_quran(force_reindex: bool = False, progress_callback=None) -> i
         collection = get_collection()
         existing = collection.get(include=["metadatas"])
         if existing and existing["ids"]:
-            quran_ids = [existing["ids"][i] for i, m in enumerate(existing["metadatas"]) if m.get("type") == "quran"]
+            quran_ids = [existing["ids"][i] for i, m in enumerate(existing["metadatas"]) if m and m.get("type") == "quran"]
             if quran_ids:
                 for i in range(0, len(quran_ids), 100):
                     batch = quran_ids[i:i+100]
@@ -246,7 +246,7 @@ async def get_quran_stats() -> dict:
         collection = client.get_collection("knowledge_base")
         all_docs = collection.get(include=["metadatas"])
         if all_docs and all_docs["metadatas"]:
-            quran_count = sum(1 for m in all_docs["metadatas"] if m.get("type") == "quran")
+            quran_count = sum(1 for m in all_docs["metadatas"] if m and m.get("type") == "quran")
     except Exception:
         pass
     return {"indexed_verses": quran_count, "total_surahs": 114}

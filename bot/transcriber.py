@@ -7,12 +7,21 @@ from bot.config import logger
 AUDIO_DIR = Path(os.path.join(os.path.dirname(os.path.dirname(__file__)), "audio_cache"))
 AUDIO_DIR.mkdir(exist_ok=True)
 
+_whisper_model = None
+
 def _sanitize_filename(name: str) -> str:
     return re.sub(r'[^\w\-_. ]', '', name)[:80]
 
 async def transcribe_youtube(video_url: str, video_id: str = None) -> str:
     try:
-        video_id = video_id or video_url.split("v=")[-1].split("&")[0] if "v=" in video_url else "unknown"
+        if not video_id:
+            # Matches watch?v=ID, shorts/ID, embed/ID, youtu.be/ID
+            match = re.search(r'(?:v=|\/shorts\/|\/embed\/|\/youtu\.be\/)([a-zA-Z0-9\-_]{11})', video_url)
+            video_id = match.group(1) if match else "unknown"
+            if video_id == "unknown":
+                import uuid
+                video_id = f"unknown_{uuid.uuid4().hex[:8]}"
+        
         audio_path = AUDIO_DIR / f"{_sanitize_filename(video_id)}.mp3"
         if audio_path.exists():
             return await _transcribe_file(str(audio_path))
@@ -34,22 +43,23 @@ async def transcribe_voice(file_path: str) -> str:
     return await _transcribe_file(file_path)
 
 async def _transcribe_file(audio_path: str) -> str:
+    global _whisper_model
     try:
         from faster_whisper import WhisperModel
-        model = WhisperModel("base", device="cpu", compute_type="int8")
-        segments, _ = model.transcribe(audio_path, beam_size=5)
+        if _whisper_model is None:
+            logger.info("Initializing local faster-whisper model...")
+            _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+        segments, _ = _whisper_model.transcribe(audio_path, beam_size=5)
         text = " ".join(seg.text for seg in segments)
         return text.strip()
-    except ImportError:
-        logger.warning("faster-whisper not installed, trying openai whisper api")
-        return await _transcribe_api(audio_path)
     except Exception as e:
-        logger.error(f"Whisper error: {e}")
-        return ""
+        logger.warning(f"Local faster-whisper failed, trying OpenAI Whisper API: {e}")
+        return await _transcribe_api(audio_path)
 
 async def _transcribe_api(audio_path: str) -> str:
     from bot.config import OPENAI_API_KEY
     if not OPENAI_API_KEY:
+        logger.warning("OpenAI API key missing; cannot transcribe audio via API.")
         return ""
     import httpx
     try:

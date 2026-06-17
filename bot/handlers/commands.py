@@ -1,3 +1,4 @@
+import re
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from telegram.constants import ChatAction
@@ -10,9 +11,16 @@ from bot.pipeline import ingest_knowledge_base, ingest_rss_content, get_pipeline
 from bot.search import search_duas, search_quran
 from bot.handlers.feedback import FEEDBACK_POSITIVE, FEEDBACK_NEGATIVE
 
+def clean_command_query(text: str, command: str) -> str:
+    """Removes the command prefix (e.g. /ask, /ask@username) from the text."""
+    pattern = re.compile(rf"^/{command}(?:@[\w_]+)?\s*", re.IGNORECASE)
+    return pattern.sub("", text).strip()
+
 def track_usage(command_name):
     def decorator(func):
         async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+            if not update.message:
+                return
             if update.effective_user:
                 user_id = update.effective_user.id
                 username = update.effective_user.username or update.effective_user.first_name
@@ -114,7 +122,7 @@ async def substack(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @track_usage("ask")
 async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.replace("/ask", "", 1).strip()
+    query = clean_command_query(update.message.text, "ask")
     if not query:
         await update.message.reply_text(
             "\u2753 <b>Ask me anything!</b>\n\n"
@@ -141,7 +149,7 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @track_usage("dua")
 async def dua_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.replace("/dua", "", 1).strip()
+    query = clean_command_query(update.message.text, "dua")
     if not query:
         await update.message.reply_text(
             "\U0001f54a <b>Search Islamic Duas</b>\n\n"
@@ -170,7 +178,7 @@ async def dua_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @track_usage("quran")
 async def quran_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.replace("/quran", "", 1).strip()
+    query = clean_command_query(update.message.text, "quran")
     if not query:
         await update.message.reply_text(
             "\U0001f4dc <b>Search the Quran</b>\n\n"

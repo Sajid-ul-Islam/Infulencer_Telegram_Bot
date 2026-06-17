@@ -236,3 +236,27 @@ def get_feedback_counts() -> dict:
     except Exception as e:
         logger.error(f"Error getting feedback counts: {e}")
         return {"positive": 0, "negative": 0, "total": 0}
+
+async def track_token_usage(user_id: int, provider: str, tokens: int, cost: float = 0.0):
+    if not db:
+        logger.info(f"[Token Usage - DryRun] User {user_id}: {tokens} tokens ({provider})")
+        return
+    try:
+        db.collection("token_usage").add({
+            "user_id": user_id,
+            "provider": provider,
+            "tokens": tokens,
+            "cost": cost,
+            "timestamp": google_firestore.SERVER_TIMESTAMP
+        })
+        ref = db.collection("user_tokens").document(str(user_id))
+        ref.set({
+            "total_tokens": google_firestore.Increment(tokens),
+            "total_cost": google_firestore.Increment(cost),
+            "last_provider": provider,
+            "last_active": google_firestore.SERVER_TIMESTAMP
+        }, merge=True)
+        logger.info(f"Logged token usage for {user_id}: {tokens} tokens ({provider})")
+    except Exception as e:
+        logger.error(f"Error tracking tokens: {e}")
+

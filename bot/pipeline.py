@@ -152,8 +152,8 @@ def get_pipeline_stats() -> dict:
             collection = client.get_collection("knowledge_base")
             all_docs = collection.get(include=["metadatas"])
             if all_docs and all_docs["metadatas"]:
-                dua_count = sum(1 for m in all_docs["metadatas"] if m.get("type") == "dua")
-                quran_count = sum(1 for m in all_docs["metadatas"] if m.get("type") == "quran")
+                dua_count = sum(1 for m in all_docs["metadatas"] if m and m.get("type") == "dua")
+                quran_count = sum(1 for m in all_docs["metadatas"] if m and m.get("type") == "quran")
     except Exception:
         pass
     return {
