@@ -153,3 +153,41 @@ def search_quran(query: str, n_results: int = 5, use_rerank: bool = True) -> str
 def rebuild_bm25_index() -> None:
     """Public proxy function to trigger BM25 rebuild."""
     _rebuild_bm25()
+
+def get_surah_verses(surah_no: int, page: int = 1, limit: int = 10) -> tuple[str, bool, bool]:
+    """Fetches a paginated list of verses for a specific Surah from the database."""
+    from bot.vectordb import get_collection
+    try:
+        collection = get_collection()
+        results = collection.get(where={"surah_no": surah_no}, include=["metadatas"])
+        if not results or not results.get("metadatas"):
+            return "No verses found for this Surah in the database.", False, False
+        
+        metas = [m for m in results["metadatas"] if m and m.get("type") == "quran"]
+        metas.sort(key=lambda x: x.get("ayah_no", 0))
+        
+        total_verses = len(metas)
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        
+        page_metas = metas[start_idx:end_idx]
+        
+        if not page_metas:
+            return "No verses found on this page.", False, False
+            
+        formatted = []
+        for meta in page_metas:
+            formatted.append(
+                f"Surah: {meta.get('surah_name', '')} ({meta.get('surah_no', '')})\n"
+                f"Ayah: {meta.get('ayah_no', '')}\n\n"
+                f"Arabic:\n{meta.get('arabic', '')}\n\n"
+                f"Translation:\n{meta.get('translation', '')}"
+            )
+            
+        has_next = end_idx < total_verses
+        has_prev = page > 1
+        
+        return "\n\n---\n\n".join(formatted), has_next, has_prev
+    except Exception as e:
+        logger.error(f"Error fetching surah verses: {e}")
+        return "An error occurred fetching verses.", False, False

@@ -255,6 +255,16 @@ async def call_agent_with_tools(api_key: str, base_url: str, model: str, message
         async with httpx.AsyncClient(timeout=20.0) as client:
             payload.pop("tools", None)
             payload.pop("tool_choice", None)
+            
+            # Self-RAG Reflection Step
+            if any(m.get("role") == "tool" for m in messages):
+                reflection_msg = {
+                    "role": "system",
+                    "content": "Self-Reflection: You have retrieved data using tools. Before answering, evaluate if this data fully and accurately answers the user's question. If it does, generate a comprehensive answer based ONLY on the retrieved data. If it doesn't, state clearly what information is missing or answer based on what is available without hallucinating."
+                }
+                messages.append(reflection_msg)
+                payload["messages"] = messages
+                
             final_response = await client.post(base_url, headers=headers, json=payload)
             final_response.raise_for_status()
             final_data = final_response.json()

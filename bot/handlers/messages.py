@@ -173,3 +173,53 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         except Exception as e:
             logger.error(f"Giveaway entry error: {e}")
             await query.answer("An error occurred. Please try again.", show_alert=True)
+            return
+
+    if query.data.startswith("dua_cat:"):
+        category = query.data.split(":")[1]
+        await query.answer(f"Searching for {category} Duas...")
+        from bot.search import search_duas
+        
+        search_query = category
+        if category == "Special":
+            search_query = "special dua"
+        elif category == "Time":
+            search_query = "time for dua"
+        elif category == "Quran":
+            search_query = "quranic dua"
+        elif category == "Event":
+            search_query = "event dua"
+            
+        result = search_duas(search_query)
+        if not result or "No relevant duas found" in result:
+            await query.edit_message_text(f"\U0001f54a No duas found for category: {category}.", parse_mode="HTML")
+        else:
+            await query.edit_message_text(f"\U0001f54a <b>{category} Duas</b>\n\n{result}", parse_mode="HTML")
+        return
+
+    if query.data.startswith("quran_surah:"):
+        parts = query.data.split(":")
+        surah_no = int(parts[1])
+        page = int(parts[2])
+        await query.answer("Fetching verses...")
+        from bot.search import get_surah_verses
+        result, has_next, has_prev = get_surah_verses(surah_no, page=page, limit=10)
+        
+        buttons = []
+        nav_buttons = []
+        if has_prev:
+            nav_buttons.append(InlineKeyboardButton("⬅️ Prev 10", callback_data=f"quran_surah:{surah_no}:{page-1}"))
+        if has_next:
+            nav_buttons.append(InlineKeyboardButton("Next 10 ➡️", callback_data=f"quran_surah:{surah_no}:{page+1}"))
+        
+        if nav_buttons:
+            buttons.append(nav_buttons)
+            
+        reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
+        
+        message_text = f"\U0001f4dc <b>Quran Surah {surah_no} (Page {page})</b>\n\n{result}"
+        if len(message_text) > 4000:
+             message_text = message_text[:4000] + "\n\n...[Truncated]"
+             
+        await query.edit_message_text(message_text, parse_mode="HTML", reply_markup=reply_markup)
+        return

@@ -151,14 +151,19 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def dua_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = clean_command_query(update.message.text, "dua")
     if not query:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Special Duas", callback_data="dua_cat:Special")],
+            [InlineKeyboardButton("Best time for dua reminder", callback_data="dua_cat:Time")],
+            [InlineKeyboardButton("Quranic Duas", callback_data="dua_cat:Quran")],
+            [InlineKeyboardButton("Event Duas", callback_data="dua_cat:Event")]
+        ])
         await update.message.reply_text(
             "\U0001f54a <b>Search Islamic Duas</b>\n\n"
-            "Search the Hisnul Muslim collection of authentic duas and supplications.\n\n"
+            "Choose a category below, or search specifically using:\n"
             "Usage: /dua <search query>\n"
-            "Example: /dua dua for sleeping\n"
-            "Example: /dua prayer for travel\n"
-            "Example: /dua supplication for food",
-            parse_mode="HTML"
+            "Example: /dua dua for sleeping",
+            parse_mode="HTML",
+            reply_markup=keyboard
         )
         return
 
@@ -180,15 +185,21 @@ async def dua_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def quran_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = clean_command_query(update.message.text, "quran")
     if not query:
+        from bot.quran_scraper import SURAH_NAMES
+        buttons = []
+        for i in range(105, 115):
+            if i in SURAH_NAMES:
+                name = SURAH_NAMES[i][0]
+                arabic = SURAH_NAMES[i][1]
+                buttons.append([InlineKeyboardButton(f"{i}. {name} - {arabic}", callback_data=f"quran_surah:{i}:1")])
+        keyboard = InlineKeyboardMarkup(buttons)
         await update.message.reply_text(
-            "\U0001f4dc <b>Search the Quran</b>\n\n"
-            "Search all 114 surahs and 6236 verses with Arabic text, word-by-word meanings, and English translation.\n\n"
+            "\U0001f4dc <b>Read the Quran</b>\n\n"
+            "Select a Surah below (last 10 Surahs), or search for a specific verse/Surah:\n"
             "Usage: /quran <search query>\n"
-            "Example: /quran ayat al-kursi\n"
-            "Example: /quran surah yasin verse 9\n"
-            "Example: /quran mercy\n"
-            "Example: /quran 36:9",
-            parse_mode="HTML"
+            "Example: /quran Surah Yasin",
+            parse_mode="HTML",
+            reply_markup=keyboard
         )
         return
 
