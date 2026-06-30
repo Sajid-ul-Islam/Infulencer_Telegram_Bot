@@ -260,3 +260,36 @@ async def track_token_usage(user_id: int, provider: str, tokens: int, cost: floa
     except Exception as e:
         logger.error(f"Error tracking tokens: {e}")
 
+def subscribe_user(user_id: int, username: str) -> bool:
+    if not db:
+        return False
+    try:
+        db.collection("subscriptions").document(str(user_id)).set({
+            "user_id": user_id,
+            "username": username,
+            "timestamp": google_firestore.SERVER_TIMESTAMP
+        })
+        return True
+    except Exception as e:
+        logger.error(f"Error subscribing user {user_id}: {e}")
+        return False
+
+def unsubscribe_user(user_id: int) -> bool:
+    if not db:
+        return False
+    try:
+        db.collection("subscriptions").document(str(user_id)).delete()
+        return True
+    except Exception as e:
+        logger.error(f"Error unsubscribing user {user_id}: {e}")
+        return False
+
+def get_subscribed_users() -> list[int]:
+    if not db:
+        return []
+    try:
+        docs = db.collection("subscriptions").stream()
+        return [doc.to_dict().get("user_id") for doc in docs if doc.to_dict().get("user_id")]
+    except Exception as e:
+        logger.error(f"Error getting subscribed users: {e}")
+        return []

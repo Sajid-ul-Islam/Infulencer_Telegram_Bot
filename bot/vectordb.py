@@ -212,3 +212,37 @@ def delete_document(post_id: str) -> None:
 
 def reset_collection() -> None:
     db_manager.reset_collection()
+
+class SemanticCacheManager(VectorDBManager):
+    def __init__(self):
+        super().__init__(collection_name="semantic_cache")
+
+cache_manager = SemanticCacheManager()
+
+def get_cached_response(query: str, threshold: float = 0.90) -> Optional[str]:
+    if not cache_manager.is_available():
+        return None
+    try:
+        hits = cache_manager.search_vector(query, n_results=1)
+        if hits and hits[0]["score"] >= threshold:
+            logger.info(f"Cache hit for query: {query[:50]}")
+            return hits[0]["metadata"].get("response")
+    except Exception as e:
+        logger.error(f"Error checking semantic cache: {e}")
+    return None
+
+def cache_response(query: str, response: str) -> None:
+    if not cache_manager.is_available():
+        return
+    try:
+        coll = cache_manager.get_collection()
+        if not coll:
+            return
+        doc_id = f"cache_{hash(query)}"
+        coll.add(
+            documents=[query],
+            metadatas=[{"response": response}],
+            ids=[doc_id]
+        )
+    except Exception as e:
+        logger.error(f"Error saving to semantic cache: {e}")

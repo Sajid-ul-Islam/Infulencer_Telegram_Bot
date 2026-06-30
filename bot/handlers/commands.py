@@ -265,3 +265,30 @@ Type any question and I'll answer using my knowledge base with AI.
 I remember our conversation context now!
     """
     await update.message.reply_text(help_text, parse_mode="HTML")
+
+@track_usage("subscribe")
+async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name
+    from bot.database import subscribe_user
+    success = subscribe_user(user_id, username)
+    if success:
+        await update.message.reply_text(
+            "\u2705 <b>Subscribed!</b>\n\nYou will now receive daily Islamic reminders (Duas and Quran Verses).",
+            parse_mode="HTML"
+        )
+    else:
+        await update.message.reply_text("Failed to subscribe. Please try again later.")
+
+@track_usage("unsubscribe")
+async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    from bot.database import unsubscribe_user
+    success = unsubscribe_user(user_id)
+    if success:
+        await update.message.reply_text(
+            "\u274c <b>Unsubscribed!</b>\n\nYou will no longer receive daily Islamic reminders.",
+            parse_mode="HTML"
+        )
+    else:
+        await update.message.reply_text("Failed to unsubscribe. Please try again later.")

@@ -503,22 +503,62 @@ ACTIVE_PROVIDERS: List[BaseAIProvider] = [
     p for p in ALL_PROVIDERS if p.api_key or (p.name == "Ollama" and p.base_url)
 ]
 
+async def summarize_history(history: list) -> str:
+    if not history or not ACTIVE_PROVIDERS:
+        return ""
+    provider = ACTIVE_PROVIDERS[0]
+    
+    text = "\n".join([f"{msg['role'].capitalize()}: {msg['content']}" for msg in history if msg.get("role") in ["user", "assistant", "system"]])
+    system_prompt = "You are a helpful assistant. Summarize the following conversation in 2-3 short sentences. Focus on the main topics discussed, user preferences, and any important context."
+    
+    try:
+        res = await provider.generate_response(text, system_prompt, messages=None, user_id=None)
+        return res or ""
+    except Exception as e:
+        logger.error(f"Error summarizing history: {e}")
+        return ""
+
 async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_memory: bool = True) -> Optional[str]:
+    from bot.vectordb import get_cached_response, cache_response
     lang = _detect_lang(user_message)
     system_prompt = get_system_prompt(user_id, lang=lang).strip()
     messages = None
+    
+    history = []
     if use_memory and user_id:
         history = get_history(user_id, max_exchanges=3)
-        if history:
-            messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": user_message}]
+        
+    # Semantic Caching
+    if not history:
+        cached = get_cached_response(user_message)
+        if cached:
+            if use_memory and user_id:
+                add_to_history(user_id, "user", user_message)
+                add_to_history(user_id, "assistant", cached)
+            return cached
+
+    if history:
+        messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": user_message}]
             
     for provider in ACTIVE_PROVIDERS:
         try:
             res = await provider.generate_response(user_message, system_prompt, messages, user_id)
             if res:
                 if use_memory and user_id:
+                    from bot.memory import chat_histories, MAX_HISTORY
                     add_to_history(user_id, "user", user_message)
                     add_to_history(user_id, "assistant", res)
+                    
+                    history_len = len(chat_histories.get(user_id, []))
+                    if history_len > MAX_HISTORY * 2:
+                        summary = await summarize_history(chat_histories[user_id])
+                        if summary:
+                            chat_histories[user_id] = [{"role": "system", "content": f"Previous conversation summary: {summary}"}]
+                
+                # Cache the response for standalone queries
+                if not history:
+                    cache_response(user_message, res)
+                    
                 return res
             logger.info(f"{provider.name} failed or returned empty. Trying next...")
         except Exception as e:

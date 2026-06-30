@@ -154,7 +154,7 @@ def rebuild_bm25_index() -> None:
     """Public proxy function to trigger BM25 rebuild."""
     _rebuild_bm25()
 
-def get_surah_verses(surah_no: int, page: int = 1, limit: int = 10) -> tuple[str, bool, bool]:
+def get_surah_verses(surah_no: int, page: int = 1, limit: int = 5) -> tuple[str, bool, bool]:
     """Fetches a paginated list of verses for a specific Surah from the database."""
     from bot.vectordb import get_collection
     try:

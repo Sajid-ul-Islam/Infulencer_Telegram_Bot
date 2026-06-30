@@ -203,14 +203,14 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         page = int(parts[2])
         await query.answer("Fetching verses...")
         from bot.search import get_surah_verses
-        result, has_next, has_prev = get_surah_verses(surah_no, page=page, limit=10)
+        result, has_next, has_prev = get_surah_verses(surah_no, page=page, limit=5)
         
         buttons = []
         nav_buttons = []
         if has_prev:
-            nav_buttons.append(InlineKeyboardButton("⬅️ Prev 10", callback_data=f"quran_surah:{surah_no}:{page-1}"))
+            nav_buttons.append(InlineKeyboardButton("⬅️ Prev 5", callback_data=f"quran_surah:{surah_no}:{page-1}"))
         if has_next:
-            nav_buttons.append(InlineKeyboardButton("Next 10 ➡️", callback_data=f"quran_surah:{surah_no}:{page+1}"))
+            nav_buttons.append(InlineKeyboardButton("Next 5 ➡️", callback_data=f"quran_surah:{surah_no}:{page+1}"))
         
         if nav_buttons:
             buttons.append(nav_buttons)
@@ -218,8 +218,12 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
         
         message_text = f"\U0001f4dc <b>Quran Surah {surah_no} (Page {page})</b>\n\n{result}"
+        
+        # Safely fallback to fewer verses if still exceeding Telegram limits to avoid HTML tag slicing
         if len(message_text) > 4000:
-             message_text = message_text[:4000] + "\n\n...[Truncated]"
+             result_parts = result.split("\n\n---\n\n")
+             safe_result = "\n\n---\n\n".join(result_parts[:2])
+             message_text = f"\U0001f4dc <b>Quran Surah {surah_no} (Page {page})</b>\n\n{safe_result}\n\n<i>...[Verses too long, please use Next]</i>"
              
         await query.edit_message_text(message_text, parse_mode="HTML", reply_markup=reply_markup)
         return
