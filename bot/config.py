@@ -27,6 +27,9 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 TIMEZONE_STR = os.getenv("TIMEZONE", "UTC")
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "admin")
 
+META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN")
+META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "my_secret_verify_token")
+
 RATE_LIMIT_DAILY = int(os.getenv("RATE_LIMIT_DAILY", "50"))
 RATE_LIMIT_VOICE_DAILY = int(os.getenv("RATE_LIMIT_VOICE_DAILY", "20"))
 INLINE_MAX_RESULTS = int(os.getenv("INLINE_MAX_RESULTS", "10"))

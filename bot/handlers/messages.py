@@ -194,7 +194,19 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         if not result or "No relevant duas found" in result:
             await query.edit_message_text(f"\U0001f54a No duas found for category: {category}.", parse_mode="HTML")
         else:
-            await query.edit_message_text(f"\U0001f54a <b>{category} Duas</b>\n\n{result}", parse_mode="HTML")
+            import html
+            message_text = f"\U0001f54a <b>{category} Duas</b>\n\n{html.escape(result)}"
+            if len(message_text) > 4000:
+                result_parts = result.split("\n\n---\n\n")
+                safe_result = html.escape("\n\n---\n\n".join(result_parts[:1]))
+                message_text = f"\U0001f54a <b>{category} Duas</b>\n\n{safe_result}\n\n<i>...[Results too long to display fully]</i>"
+                
+            try:
+                await query.edit_message_text(message_text, parse_mode="HTML")
+            except Exception as e:
+                from bot.config import logger
+                logger.error(f"Error editing dua message: {e}")
+                await query.edit_message_text("An error occurred while displaying the results. Please try a different query.")
         return
 
     if query.data.startswith("quran_surah:"):
@@ -217,15 +229,21 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             
         reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
         
-        message_text = f"\U0001f4dc <b>Quran Surah {surah_no} (Page {page})</b>\n\n{result}"
+        import html
+        message_text = f"\U0001f4dc <b>Quran Surah {surah_no} (Page {page})</b>\n\n{html.escape(result)}"
         
         # Safely fallback to fewer verses if still exceeding Telegram limits to avoid HTML tag slicing
         if len(message_text) > 4000:
              result_parts = result.split("\n\n---\n\n")
-             safe_result = "\n\n---\n\n".join(result_parts[:2])
+             safe_result = html.escape("\n\n---\n\n".join(result_parts[:2]))
              message_text = f"\U0001f4dc <b>Quran Surah {surah_no} (Page {page})</b>\n\n{safe_result}\n\n<i>...[Verses too long, please use Next]</i>"
              
-        await query.edit_message_text(message_text, parse_mode="HTML", reply_markup=reply_markup)
+        try:
+            await query.edit_message_text(message_text, parse_mode="HTML", reply_markup=reply_markup)
+        except Exception as e:
+            from bot.config import logger
+            logger.error(f"Error editing quran message: {e}")
+            await query.edit_message_text("An error occurred while displaying the verses.")
         return
 
     if query.data.startswith("setlang:"):

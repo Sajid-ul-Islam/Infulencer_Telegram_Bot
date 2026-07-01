@@ -1,0 +1,6 @@
+What you would need to set up:
+If you want to do this, the main setup is on Meta's side:
+
+Creating a Meta Developer Account and a new App.
+Adding the WhatsApp / Messenger / Instagram products to the app.
+Generating a System User Access Token and verifying your webhook URL (which would be your Render URL, e.g., https://your-app.onrender.com/api/meta/webhook).

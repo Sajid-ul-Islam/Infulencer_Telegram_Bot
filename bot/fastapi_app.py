@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from bot.config import (
-    logger, DASHBOARD_PASSWORD, TELEGRAM_TOKEN, CHANNEL_ID, GROUP_ID
+    logger, DASHBOARD_PASSWORD, TELEGRAM_TOKEN, CHANNEL_ID, GROUP_ID, META_VERIFY_TOKEN
 )
 from bot.database import (
     FAQ, save_faq, remove_faq, db, get_feedback_counts, 
@@ -44,6 +44,33 @@ def check_auth(request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def get_dashboard():
     return DASHBOARD_HTML
+
+@app.get("/api/meta/webhook")
+async def verify_meta_webhook(request: Request):
+    mode = request.query_params.get("hub.mode")
+    token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge")
+
+    if mode and token:
+        if mode == "subscribe" and token == META_VERIFY_TOKEN:
+            logger.info("Meta Webhook verified successfully!")
+            return Response(content=challenge, media_type="text/plain", status_code=200)
+        else:
+            return Response(status_code=403)
+    return Response(status_code=400)
+
+@app.post("/api/meta/webhook")
+async def receive_meta_webhook(request: Request):
+    from bot.handlers.meta import handle_meta_webhook_payload
+    try:
+        payload = await request.json()
+        logger.info("Received Meta Webhook")
+        # Run in background to acknowledge Meta quickly (they require a 200 OK within 20 seconds)
+        asyncio.create_task(handle_meta_webhook_payload(payload))
+        return Response(content="EVENT_RECEIVED", status_code=200)
+    except Exception as e:
+        logger.error(f"Error handling Meta webhook: {e}")
+        return Response(status_code=404)
 
 @app.post("/api/login")
 async def login(request: Request):

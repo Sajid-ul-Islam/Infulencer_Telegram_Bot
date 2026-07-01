@@ -362,6 +362,7 @@ async def dua_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    import html
     await update.message.chat.send_action(ChatAction.TYPING)
     result = search_duas(query)
     if not result or "No relevant duas found" in result:
@@ -371,10 +372,18 @@ async def dua_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await update.message.reply_text(
-        f"\U0001f54a <b>Hisnul Muslim Search Results</b>\n\n{result}",
-        parse_mode="HTML"
-    )
+    message_text = f"\U0001f54a <b>Hisnul Muslim Search Results</b>\n\n{html.escape(result)}"
+    
+    if len(message_text) > 4000:
+        result_parts = result.split("\n\n---\n\n")
+        safe_result = html.escape("\n\n---\n\n".join(result_parts[:1]))
+        message_text = f"\U0001f54a <b>Hisnul Muslim Search Results</b>\n\n{safe_result}\n\n<i>...[Results too long to display fully]</i>"
+
+    try:
+        await update.message.reply_text(message_text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error sending dua response: {e}")
+        await update.message.reply_text("An error occurred while displaying the results. Please try a different query.")
 
 @track_usage("quran")
 async def quran_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -398,6 +407,7 @@ async def quran_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    import html
     await update.message.chat.send_action(ChatAction.TYPING)
     result = search_quran(query)
     if not result or "No relevant Quran verses found" in result:
@@ -407,10 +417,17 @@ async def quran_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await update.message.reply_text(
-        f"\U0001f4dc <b>Quran Search Results</b>\n\n{result}",
-        parse_mode="HTML"
-    )
+    message_text = f"\U0001f4dc <b>Quran Search Results</b>\n\n{html.escape(result)}"
+    if len(message_text) > 4000:
+        result_parts = result.split("\n\n---\n\n")
+        safe_result = html.escape("\n\n---\n\n".join(result_parts[:1]))
+        message_text = f"\U0001f4dc <b>Quran Search Results</b>\n\n{safe_result}\n\n<i>...[Results too long to display fully]</i>"
+
+    try:
+        await update.message.reply_text(message_text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error sending quran response: {e}")
+        await update.message.reply_text("An error occurred while displaying the results. Please try a different query.")
 
 @track_usage("forget")
 async def forget_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
