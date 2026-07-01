@@ -43,38 +43,27 @@ async def transcribe_voice(file_path: str) -> str:
     return await _transcribe_file(file_path)
 
 async def _transcribe_file(audio_path: str) -> str:
-    global _whisper_model
-    try:
-        from faster_whisper import WhisperModel
-        if _whisper_model is None:
-            logger.info("Initializing local faster-whisper model...")
-            _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
-        segments, _ = _whisper_model.transcribe(audio_path, beam_size=5)
-        text = " ".join(seg.text for seg in segments)
-        return text.strip()
-    except Exception as e:
-        logger.warning(f"Local faster-whisper failed, trying OpenAI Whisper API: {e}")
-        return await _transcribe_api(audio_path)
-
-async def _transcribe_api(audio_path: str) -> str:
-    from bot.config import OPENAI_API_KEY
-    if not OPENAI_API_KEY:
-        logger.warning("OpenAI API key missing; cannot transcribe audio via API.")
+    from bot.config import GROQ_API_KEY
+    if not GROQ_API_KEY:
+        logger.warning("Groq API key missing; cannot transcribe audio.")
         return ""
+        
     import httpx
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             with open(audio_path, "rb") as f:
-                files = {"file": (os.path.basename(audio_path), f, "audio/mpeg")}
-                headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+                # Telegram sends OGG files
+                content_type = "audio/ogg" if audio_path.endswith(".ogg") else "audio/mpeg"
+                files = {"file": (os.path.basename(audio_path), f, content_type)}
+                headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
                 response = await client.post(
-                    "https://api.openai.com/v1/audio/transcriptions",
-                    headers=headers, data={"model": "whisper-1"}, files=files
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers=headers, data={"model": "whisper-large-v3-turbo"}, files=files
                 )
                 response.raise_for_status()
                 return response.json().get("text", "")
     except Exception as e:
-        logger.error(f"OpenAI Whisper API error: {e}")
+        logger.error(f"Groq Whisper API error: {e}")
         return ""
 
 def cleanup_audio(age_hours: int = 24):

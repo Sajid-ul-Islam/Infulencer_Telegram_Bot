@@ -227,3 +227,16 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
              
         await query.edit_message_text(message_text, parse_mode="HTML", reply_markup=reply_markup)
         return
+
+    if query.data.startswith("setlang:"):
+        lang_code = query.data.split(":")[1]
+        user_id = query.from_user.id
+        from bot.database import set_user_language
+        success = set_user_language(user_id, lang_code)
+        if success:
+            lang_name = "Bengali 🇧🇩" if lang_code == "bn" else "English 🇬🇧"
+            await query.answer(f"Language set to {lang_name}")
+            await query.edit_message_text(f"✅ Language preference successfully set to {lang_name}.")
+        else:
+            await query.answer("Failed to set language", show_alert=True)
+        return

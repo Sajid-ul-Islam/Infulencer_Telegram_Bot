@@ -4,13 +4,28 @@ from telegram import Update, BotCommand, BotCommandScopeDefault, BotCommandScope
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, InlineQueryHandler
 from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ, ADMIN_ID
 from bot.database import load_faqs
-from bot.server import start_server_threads
+from bot.server import ping_self
+import os
+import threading
+import uvicorn
+
+def start_fastapi_server():
+    port = int(os.environ.get("PORT", 8080))
+    logger.info(f"Starting FastAPI server on port {port}")
+    uvicorn.run("bot.fastapi_app:app", host="0.0.0.0", port=port, log_level="info")
+
+def start_background_services():
+    fastapi_thread = threading.Thread(target=start_fastapi_server, daemon=True)
+    fastapi_thread.start()
+    
+    ping_thread = threading.Thread(target=ping_self, daemon=True)
+    ping_thread.start()
 from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, greeting_post, weekly_digest, daily_islamic_reminder
 from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses
 from bot.handlers.commands import (
     start, socials_command, latest, youtube, medium, substack,
     ask_command, dua_command, quran_command, forget_command, ingest_command, help_command,
-    subscribe_command, unsubscribe_command
+    subscribe_command, unsubscribe_command, language_command
 )
 from bot.handlers.admin import (
     postlatest_command, ban_command, mute_command, questions_command,
@@ -98,7 +113,7 @@ async def post_init(application: Application):
     asyncio.create_task(background_init(application))
 
 def main():
-    start_server_threads()
+    start_background_services()
 
     application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
@@ -114,6 +129,7 @@ def main():
     application.add_handler(CommandHandler("dua", dua_command))
     application.add_handler(CommandHandler("quran", quran_command))
     application.add_handler(CommandHandler("forget", forget_command))
+    application.add_handler(CommandHandler("language", language_command))
     application.add_handler(CommandHandler("ingest", ingest_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("suggest", suggest_command))

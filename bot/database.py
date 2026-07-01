@@ -1,4 +1,5 @@
 import json
+from typing import Optional
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud import firestore as google_firestore
@@ -293,3 +294,28 @@ def get_subscribed_users() -> list[int]:
     except Exception as e:
         logger.error(f"Error getting subscribed users: {e}")
         return []
+
+def set_user_language(user_id: int, lang_code: str) -> bool:
+    if not db:
+        return False
+    try:
+        db.collection("users").document(str(user_id)).set({
+            "language": lang_code,
+            "last_active": google_firestore.SERVER_TIMESTAMP
+        }, merge=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error setting user language for {user_id}: {e}")
+        return False
+
+def get_user_language(user_id: int) -> Optional[str]:
+    if not db:
+        return None
+    try:
+        doc = db.collection("users").document(str(user_id)).get()
+        if doc.exists:
+            return doc.to_dict().get("language")
+        return None
+    except Exception as e:
+        logger.error(f"Error getting user language for {user_id}: {e}")
+        return None

@@ -24,3 +24,9 @@ services:
       - key: DASHBOARD_PASSWORD
         sync: false
 
+    # To use a Persistent Disk for ChromaDB, you must be on a paid Render plan (e.g., plan: starter).
+    # Uncomment the following to mount a persistent disk:
+    # disk:
+    #   name: chromadb-data
+    #   mountPath: /app/chroma_db
+    #   sizeGB: 1

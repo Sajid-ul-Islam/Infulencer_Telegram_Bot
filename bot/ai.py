@@ -200,332 +200,69 @@ async def execute_tool(tool_name: str, arguments: dict) -> str:
         return msg or f"No recent {platform} content found."
     return f"Unknown tool: {tool_name}"
 
-async def call_agent_with_tools(api_key: str, base_url: str, model: str, messages: list, max_tool_rounds: int = 3, user_id: Optional[int] = None, provider: str = "AI") -> Optional[str]:
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    if "openrouter.ai" in base_url:
-        headers["HTTP-Referer"] = "https://t.me/BeardedBangaliBot"
-        headers["X-Title"] = "Bearded Bangali Bot"
-    payload = {
-        "messages": messages,
-        "model": model,
-        "temperature": 0.7,
-        "tools": TOOLS,
-        "tool_choice": "auto"
-    }
-    for round_num in range(max_tool_rounds):
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                response = await client.post(base_url, headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
-                message = data["choices"][0]["message"]
-                
-                usage = data.get("usage", {})
-                tokens = usage.get("total_tokens", 0)
-                if user_id and tokens > 0:
-                    asyncio.create_task(track_token_usage(user_id, provider, tokens, tokens * 0.0000005))
-                
-                if not message.get("tool_calls"):
-                    return message.get("content", "")
-                messages.append({
-                    "role": "assistant",
-                    "content": message.get("content") or None,
-                    "tool_calls": message["tool_calls"]
-                })
-                for tool_call in message["tool_calls"]:
-                    func_name = tool_call["function"]["name"]
-                    try:
-                        args = json.loads(tool_call["function"]["arguments"])
-                    except json.JSONDecodeError:
-                        args = {}
-                    tool_result = await execute_tool(func_name, args)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": str(tool_result)[:2000]
-                    })
-                payload["messages"] = messages
-        except Exception as e:
-            logger.error(f"Error in agent loop ({base_url}, round {round_num}): {e}")
-            return None
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            payload.pop("tools", None)
-            payload.pop("tool_choice", None)
-            
-            # Self-RAG Reflection Step
-            if any(m.get("role") == "tool" for m in messages):
-                reflection_msg = {
-                    "role": "system",
-                    "content": "Self-Reflection: You have retrieved data using tools. Before answering, evaluate if this data fully and accurately answers the user's question. If it does, generate a comprehensive answer based ONLY on the retrieved data. If it doesn't, state clearly what information is missing or answer based on what is available without hallucinating."
-                }
-                messages.append(reflection_msg)
-                payload["messages"] = messages
-                
-            final_response = await client.post(base_url, headers=headers, json=payload)
-            final_response.raise_for_status()
-            final_data = final_response.json()
-            
-            usage = final_data.get("usage", {})
-            tokens = usage.get("total_tokens", 0)
-            if user_id and tokens > 0:
-                asyncio.create_task(track_token_usage(user_id, provider, tokens, tokens * 0.0000005))
-                
-            return final_data["choices"][0]["message"]["content"]
-    except Exception as e:
-        logger.error(f"Error in final agent call ({base_url}): {e}")
-        return None
+import time
+import litellm
 
-async def call_openai_compatible(api_key: str, base_url: str, model: str, user_message: str, system_prompt: str, use_tools: bool = True, user_id: Optional[int] = None, provider: str = "AI", messages: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
-    msgs = messages or [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message}
-    ]
-    if use_tools:
-        return await call_agent_with_tools(api_key, base_url, model, msgs, user_id=user_id, provider=provider)
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    if "openrouter.ai" in base_url:
-        headers["HTTP-Referer"] = "https://t.me/BeardedBangaliBot"
-        headers["X-Title"] = "Bearded Bangali Bot"
-    payload = {
-        "messages": msgs,
-        "model": model,
-        "temperature": 0.7
-    }
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(base_url, headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            
-            usage = data.get("usage", {})
-            tokens = usage.get("total_tokens", 0)
-            if user_id and tokens > 0:
-                asyncio.create_task(track_token_usage(user_id, provider, tokens, tokens * 0.0000005))
-                
-            return data["choices"][0]["message"]["content"]
-    except Exception as e:
-        logger.error(f"Error calling {base_url}: {e}")
-        return None
-
-# ============ AI STRATEGY PROVIDERS ============
-
-class BaseAIProvider(ABC):
-    """Abstract Strategy interface defining standard API structure for cascading AI nodes."""
-    
-    def __init__(self, name: str, api_key: Optional[str], model: str):
-        self.name = name
-        self.api_key = api_key
-        self.model = model
-
-    @abstractmethod
-    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
-        """Core execution pipeline representing LLM call."""
-        pass
-
-class OpenRouterAIProvider(BaseAIProvider):
-    def __init__(self) -> None:
-        super().__init__("OpenRouter", OPENROUTER_API_KEY, "openai/gpt-4o-mini")
-        self.base_url = "https://openrouter.ai/api/v1/chat/completions"
-
-    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
-        if not self.api_key:
-            return None
-        msgs = messages or [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
-        return await call_agent_with_tools(self.api_key, self.base_url, self.model, msgs, user_id=user_id, provider=self.name)
-
-class OpenAIProvider(BaseAIProvider):
-    def __init__(self) -> None:
-        super().__init__("OpenAI", OPENAI_API_KEY, "gpt-4o-mini")
-        self.base_url = "https://api.openai.com/v1/chat/completions"
-
-    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
-        if not self.api_key:
-            return None
-        msgs = messages or [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
-        return await call_agent_with_tools(self.api_key, self.base_url, self.model, msgs, user_id=user_id, provider=self.name)
-
-class GroqAIProvider(BaseAIProvider):
-    def __init__(self) -> None:
-        super().__init__("Groq", GROQ_API_KEY, "llama-3.1-8b-instant")
-        self.base_url = "https://api.groq.com/openai/v1/chat/completions"
-
-    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
-        if not self.api_key:
-            return None
-        return await call_openai_compatible(self.api_key, self.base_url, self.model, user_message, system_prompt, use_tools=False, user_id=user_id, provider=self.name, messages=messages)
-
-class xAIProvider(BaseAIProvider):
-    def __init__(self) -> None:
-        super().__init__("xAI", XAI_API_KEY, "grok-beta")
-        self.base_url = "https://api.x.ai/v1/chat/completions"
-
-    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
-        if not self.api_key:
-            return None
-        return await call_openai_compatible(self.api_key, self.base_url, self.model, user_message, system_prompt, use_tools=True, user_id=user_id, provider=self.name, messages=messages)
-
-class AnthropicAIProvider(BaseAIProvider):
-    def __init__(self) -> None:
-        super().__init__("Anthropic", ANTHROPIC_API_KEY, "claude-3-haiku-20240307")
-
-    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
-        if not self.api_key:
-            return None
-        anthropic_messages = []
-        if messages:
-            for m in messages:
-                if m["role"] in ["user", "assistant"]:
-                    anthropic_messages.append({"role": m["role"], "content": m["content"]})
-        if not anthropic_messages:
-            anthropic_messages = [{"role": "user", "content": user_message}]
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={
-                        "x-api-key": self.api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json"
-                    },
-                    json={
-                        "model": self.model,
-                        "max_tokens": 300,
-                        "system": system_prompt,
-                        "messages": anthropic_messages
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
-                usage = data.get("usage", {})
-                tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
-                if user_id and tokens > 0:
-                    asyncio.create_task(track_token_usage(user_id, self.name, tokens, tokens * 0.000001))
-                return data["content"][0]["text"]
-        except Exception as e:
-            logger.error(f"Error calling Anthropic API: {e}")
-            return None
-
-class GeminiAIProvider(BaseAIProvider):
-    def __init__(self) -> None:
-        super().__init__("Gemini", GEMINI_API_KEY, "gemini-1.5-flash")
-
-    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
-        if not self.api_key:
-            return None
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        gemini_contents = []
-        if messages:
-            for m in messages:
-                if m["role"] in ["user", "assistant"]:
-                    role = "user" if m["role"] == "user" else "model"
-                    gemini_contents.append({"role": role, "parts": [{"text": m["content"]}]})
-        if not gemini_contents:
-            gemini_contents = [{"role": "user", "parts": [{"text": user_message}]}]
-        payload = {
-            "system_instruction": {"parts": {"text": system_prompt}},
-            "contents": gemini_contents,
-            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 300}
-        }
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-                data = response.json()
-                usage = data.get("usageMetadata", {})
-                tokens = usage.get("totalTokenCount", 0)
-                if user_id and tokens > 0:
-                    asyncio.create_task(track_token_usage(user_id, self.name, tokens, tokens * 0.0000001))
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            logger.error(f"Error calling Gemini API: {e}")
-            return None
-
-class OllamaAIProvider(BaseAIProvider):
-    def __init__(self) -> None:
-        super().__init__("Ollama", "ollama_placeholder", OLLAMA_MODEL)
-        self.base_url = OLLAMA_BASE_URL.rstrip("/")
-
-    async def generate_response(self, user_message: str, system_prompt: str, messages: Optional[List[Dict[str, Any]]] = None, user_id: Optional[int] = None) -> Optional[str]:
-        if not self.base_url:
-            return None
-        ollama_messages = messages or [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
-        ]
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                payload = {
-                    "model": self.model,
-                    "messages": ollama_messages,
-                    "stream": False,
-                    "options": {"temperature": 0.7}
-                }
-                endpoint = f"{self.base_url}/v1/chat/completions" if "v1" not in self.base_url else f"{self.base_url}/chat/completions"
-                response = await client.post(endpoint, json=payload)
-                response.raise_for_status()
-                data = response.json()
-                usage = data.get("usage", {})
-                tokens = usage.get("total_tokens", 0)
-                if not tokens:
-                    tokens = data.get("prompt_eval_count", 0) + data.get("eval_count", 0)
-                if user_id and tokens > 0:
-                    asyncio.create_task(track_token_usage(user_id, self.name, tokens, 0.0))
-                return data.get("message", {}).get("content") or data.get("response", "")
-        except Exception as e:
-            logger.warning(f"Ollama unavailable ({self.base_url}): {e}")
-            return None
-
-# ============ EXPORTED ENGINE ACTIONS ============
+FAILED_PROVIDERS = {}
 
 def _detect_lang(text: str) -> str:
     bengali_chars = sum(1 for c in text if ord(c) in range(0x0980, 0x09FF))
     return "bn" if bengali_chars > 3 else "en"
 
-# Initialize strategy providers as module-level constants
-ALL_PROVIDERS: List[BaseAIProvider] = [
-    OpenRouterAIProvider(),
-    GroqAIProvider(),
-    OpenAIProvider(),
-    AnthropicAIProvider(),
-    xAIProvider(),
-    GeminiAIProvider(),
-    OllamaAIProvider()
-]
+def contains_arabic(text: str) -> bool:
+    if not text: return False
+    return any("\u0600" <= c <= "\u06FF" for c in text)
 
-ACTIVE_PROVIDERS: List[BaseAIProvider] = [
-    p for p in ALL_PROVIDERS if p.api_key or (p.name == "Ollama" and p.base_url)
-]
+def validate_arabic_text(final_response: str, tools_output: str) -> str:
+    if not contains_arabic(final_response):
+        return final_response
+        
+    arabic_pattern = re.compile(r'[\u0600-\u06FF\s]+')
+    res_blocks = arabic_pattern.findall(final_response)
+    
+    tool_arabic = ''.join([c for c in tools_output if "\u0600" <= c <= "\u06FF" or c.isspace()])
+    tool_clean = re.sub(r'\s+', '', tool_arabic)
+    
+    if not tool_clean:
+        return final_response + "\n\n⚠️ *Warning: The bot generated Arabic text that was not found in the verified database. Please verify.*"
+        
+    for block in res_blocks:
+        block_clean = re.sub(r'\s+', '', block)
+        if block_clean and block_clean not in tool_clean:
+            return final_response + "\n\n⚠️ *Warning: The Arabic text above might contain inaccuracies or formatting differences compared to the verified source. Please verify.*"
+            
+    return final_response
 
 async def summarize_history(history: list) -> str:
-    if not history or not ACTIVE_PROVIDERS:
+    if not history:
         return ""
-    provider = ACTIVE_PROVIDERS[0]
-    
     text = "\n".join([f"{msg['role'].capitalize()}: {msg['content']}" for msg in history if msg.get("role") in ["user", "assistant", "system"]])
     system_prompt = "You are a helpful assistant. Summarize the following conversation in 2-3 short sentences. Focus on the main topics discussed, user preferences, and any important context."
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": text}]
     
     try:
-        res = await provider.generate_response(text, system_prompt, messages=None, user_id=None)
-        return res or ""
+        res = await litellm.acompletion(
+            model="openrouter/openai/gpt-4o-mini",
+            api_key=OPENROUTER_API_KEY,
+            messages=messages
+        )
+        return res.choices[0].message.content or ""
     except Exception as e:
         logger.error(f"Error summarizing history: {e}")
         return ""
 
 async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_memory: bool = True) -> Optional[str]:
     from bot.vectordb import get_cached_response, cache_response
-    lang = _detect_lang(user_message)
+    from bot.database import get_user_language
+    
+    pref_lang = get_user_language(user_id) if user_id else None
+    lang = pref_lang or _detect_lang(user_message)
+    
     system_prompt = get_system_prompt(user_id, lang=lang).strip()
-    messages = None
     
     history = []
     if use_memory and user_id:
+        from bot.memory import chat_histories, MAX_HISTORY, get_history, add_to_history
         history = get_history(user_id, max_exchanges=3)
         
     # Semantic Caching
@@ -537,17 +274,99 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                 add_to_history(user_id, "assistant", cached)
             return cached
 
-    if history:
-        messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": user_message}]
+    messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": user_message}]
             
-    for provider in ACTIVE_PROVIDERS:
+    models = [
+        ("openrouter/openai/gpt-4o-mini", OPENROUTER_API_KEY, "OpenRouter"),
+        ("groq/llama-3.1-8b-instant", GROQ_API_KEY, "Groq"),
+        ("gemini/gemini-1.5-flash", GEMINI_API_KEY, "Gemini"),
+        ("openai/gpt-4o-mini", OPENAI_API_KEY, "OpenAI"),
+        ("anthropic/claude-3-haiku-20240307", ANTHROPIC_API_KEY, "Anthropic"),
+        ("xai/grok-beta", XAI_API_KEY, "xAI")
+    ]
+    
+    final_res = None
+    
+    for model_name, api_key, provider_name in models:
+        if not api_key:
+            continue
+            
+        # Circuit breaker
+        if model_name in FAILED_PROVIDERS:
+            fail_time, fail_count = FAILED_PROVIDERS[model_name]
+            if fail_count >= 3:
+                if time.time() - fail_time < 300: # 5 minutes cooldown
+                    logger.warning(f"Circuit breaker active for {model_name}. Skipping.")
+                    continue
+                else:
+                    FAILED_PROVIDERS.pop(model_name, None)
+                    
         try:
-            res = await provider.generate_response(user_message, system_prompt, messages, user_id)
-            if res:
+            logger.info(f"Attempting inference with {model_name}")
+            
+            # Allow up to 3 tool rounds
+            for _ in range(3):
+                response = await litellm.acompletion(
+                    model=model_name,
+                    api_key=api_key,
+                    messages=messages,
+                    tools=TOOLS,
+                    temperature=0.7
+                )
+                message = response.choices[0].message
+                
+                # Track tokens
+                usage = response.usage
+                if usage and user_id:
+                    tokens = getattr(usage, 'total_tokens', 0)
+                    if tokens > 0:
+                        asyncio.create_task(track_token_usage(user_id, provider_name, tokens, tokens * 0.0000005))
+                
+                tool_calls = getattr(message, 'tool_calls', None)
+                if not tool_calls:
+                    final_res = message.content
+                    break
+                    
+                messages.append(message.model_dump(exclude_none=True))
+                
+                for tool_call in tool_calls:
+                    func_name = tool_call.function.name
+                    try:
+                        args = json.loads(tool_call.function.arguments)
+                    except Exception:
+                        args = {}
+                    
+                    tool_result = await execute_tool(func_name, args)
+                    
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": func_name,
+                        "content": str(tool_result)[:2000]
+                    })
+                    
+            if final_res is None: # means it looped 3 times and still returned tool calls
+                messages.append({
+                    "role": "system",
+                    "content": "Self-Reflection: You have retrieved data using tools. Before answering, evaluate if this data fully and accurately answers the user's question. If it does, generate a comprehensive answer based ONLY on the retrieved data. If it doesn't, state clearly what information is missing or answer based on what is available without hallucinating."
+                })
+                final_response = await litellm.acompletion(
+                    model=model_name,
+                    api_key=api_key,
+                    messages=messages,
+                    temperature=0.7
+                )
+                final_res = final_response.choices[0].message.content
+                
+            FAILED_PROVIDERS.pop(model_name, None) # Success, reset failure
+            
+            if final_res:
+                tool_outputs = " ".join([m.get("content", "") for m in messages if m.get("role") == "tool"])
+                final_res = validate_arabic_text(final_res, tool_outputs)
+                
                 if use_memory and user_id:
-                    from bot.memory import chat_histories, MAX_HISTORY
                     add_to_history(user_id, "user", user_message)
-                    add_to_history(user_id, "assistant", res)
+                    add_to_history(user_id, "assistant", final_res)
                     
                     history_len = len(chat_histories.get(user_id, []))
                     if history_len > MAX_HISTORY * 2:
@@ -555,14 +374,15 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                         if summary:
                             chat_histories[user_id] = [{"role": "system", "content": f"Previous conversation summary: {summary}"}]
                 
-                # Cache the response for standalone queries
                 if not history:
-                    cache_response(user_message, res)
+                    cache_response(user_message, final_res)
                     
-                return res
-            logger.info(f"{provider.name} failed or returned empty. Trying next...")
+                return final_res
+                
         except Exception as e:
-            logger.error(f"{provider.name} strategy error: {e}")
+            logger.error(f"{model_name} failed: {e}")
+            fail_time, fail_count = FAILED_PROVIDERS.get(model_name, (time.time(), 0))
+            FAILED_PROVIDERS[model_name] = (time.time(), fail_count + 1)
             
     return None
 
