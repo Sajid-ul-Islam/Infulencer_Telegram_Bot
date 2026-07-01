@@ -101,17 +101,43 @@ async def daily_islamic_reminder(context: ContextTypes.DEFAULT_TYPE):
     try:
         users = get_subscribed_users()
         if not users:
-            message = f"\U0001f4dc <b>Daily Quran Reminder</b>\n\n"
-            message += f"<b>Surah {chosen_meta.get('surah_name', '')} - Ayah {chosen_meta.get('ayah_no', '')}</b>\n"
-            message += f"{chosen_meta.get('arabic', '')}\n\n"
-            message += f"<i>{chosen_meta.get('translation', '')}</i>"
-            
+            logger.info("No subscribed users for daily reminder.")
+            return
+
+        # Pick a random Quran verse from the vector DB
+        message = None
+        try:
+            collection = get_collection()
+            if collection:
+                results = collection.get(
+                    where={"type": "quran"},
+                    include=["metadatas"],
+                    limit=100
+                )
+                if results and results.get("metadatas"):
+                    metas = [m for m in results["metadatas"] if m]
+                    if metas:
+                        chosen_meta = random.choice(metas)
+                        message = (
+                            f"\U0001f4dc <b>Daily Quran Reminder</b>\n\n"
+                            f"<b>Surah {chosen_meta.get('surah_name', '')} - Ayah {chosen_meta.get('ayah_no', '')}</b>\n"
+                            f"{chosen_meta.get('arabic', '')}\n\n"
+                            f"<i>{chosen_meta.get('translation', '')}</i>"
+                        )
+        except Exception as e:
+            logger.error(f"Error fetching random Quran verse: {e}")
+
+        if not message:
+            message = "\U0001f4dc <b>Daily Quran Reminder</b>\n\nMay Allah bless you today and always. 🤲"
+
+        sent_count = 0
         for user_id in users:
             try:
                 await context.bot.send_message(chat_id=user_id, text=message, parse_mode="HTML")
+                sent_count += 1
             except Exception as e:
                 logger.error(f"Failed to send reminder to {user_id}: {e}")
-                
-        logger.info(f"Sent daily reminders to {len(users)} users.")
+
+        logger.info(f"Sent daily reminders to {sent_count}/{len(users)} users.")
     except Exception as e:
         logger.error(f"Error in daily_islamic_reminder: {e}")
