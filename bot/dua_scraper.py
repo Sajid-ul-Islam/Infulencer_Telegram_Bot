@@ -28,13 +28,12 @@ async def discover_dua_ids() -> list[int]:
             response = await client.get(f"{DUA_SOURCE_URL}/en/")
             response.raise_for_status()
             json_data = extract_next_data(response.text)
-            if not json_data:
-                logger.error("Could not extract __NEXT_DATA__ from homepage")
-                return []
-            props = json_data.get("props", {}).get("pageProps", {})
-            dua_list = props.get("duaResponse", {}).get("data", [])
+            dua_list = []
+            if json_data:
+                props = json_data.get("props", {}).get("pageProps", {})
+                dua_list = props.get("duaResponse", {}).get("data", [])
             if not dua_list:
-                links = re.findall(r'href="(/en/dua/(\d+))"', response.text)
+                links = re.findall(r'href="(/en/dua/(\d+)/?)"', response.text)
                 ids = sorted(set(int(d[1]) for d in links))
                 if ids:
                     return ids
@@ -43,7 +42,7 @@ async def discover_dua_ids() -> list[int]:
             ids = sorted(set(int(d.get("id", 0)) for d in dua_list if d.get("id")))
             if ids:
                 return ids
-            links = re.findall(r'href="(/en/dua/(\d+))"', response.text)
+            links = re.findall(r'href="(/en/dua/(\d+)/?)"', response.text)
             ids = sorted(set(int(d[1]) for d in links))
             return ids if ids else []
     except Exception as e:
@@ -63,17 +62,17 @@ async def _get_category_map() -> dict:
             json_data = extract_next_data(response.text)
             if json_data:
                 props = json_data.get("props", {}).get("pageProps", {})
-                cat_data = props.get("chapData", [])
+                cat_data = props.get("categories", []) or props.get("chapData", [])
                 if cat_data:
                     _dua_categories.clear()
                     _chap_id_to_slug.clear()
                     seen_slugs = set()
                     for c in cat_data:
-                        slug = c.get("slug", "")
+                        slug = c.get("engName", c.get("slug", ""))
                         chap_id = c.get("id")
                         if slug and slug not in seen_slugs:
                             seen_slugs.add(slug)
-                            display = c.get("chapname", slug.replace("-", " ").title())
+                            display = c.get("name_eng", c.get("chapname", slug.replace("-", " ").title()))
                             _dua_categories.append((slug, display))
                         if chap_id is not None:
                             _chap_id_to_slug[str(chap_id)] = slug
