@@ -46,10 +46,22 @@ def search_bm25(query: str, n_results: int = 5) -> List[Dict[str, Any]]:
             })
     return hits
 
-def hybrid_search(query: str, n_results: int = 5, alpha: float = 0.5) -> List[Dict[str, Any]]:
-    """Combines vector search and BM25 search scores into a single ranked list."""
-    vector_hits = search_vector(query, n_results=n_results * 2)
+def hybrid_search(query: str, n_results: int = 5, alpha: float = 0.5, where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Combines vector search and BM25 search scores into a single ranked list.
+    Accepts an optional ChromaDB where filter scoped to the vector search.
+    BM25 results are filtered post-hoc by matching item IDs when a where filter is used."""
+    vector_hits = search_vector(query, n_results=n_results * 2, where=where)
     bm25_hits = search_bm25(query, n_results=n_results * 2)
+    # If vector search was scoped, filter BM25 hits to match the same scope
+    if where and bm25_hits:
+        scoped_ids = {h["id"] for h in vector_hits}
+        if scoped_ids:
+            bm25_hits = [h for h in bm25_hits if h["id"] in scoped_ids]
+        else:
+            # Vector returned nothing — filter BM25 by metadata type as best effort
+            doc_type = where.get("type", "")
+            if doc_type:
+                bm25_hits = [h for h in bm25_hits if h.get("metadata", {}).get("type") == doc_type]
     combined = {}
     for hit in vector_hits:
         doc_id = hit["id"]
@@ -113,11 +125,9 @@ def search_pipeline(query: str, n_results: int = 5, use_rerank: bool = True) -> 
     return "\n\n---\n\n".join(formatted)
 
 def search_duas(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
-    """Executes the RAG search pipeline scoped for Hisnul Muslim duas."""
-    hits = search_vector(query, n_results=n_results * 2, where={"type": "dua"})
-    if not hits:
-        bm25_hits = search_bm25(query, n_results=n_results * 2)
-        hits = [h for h in bm25_hits if h.get("metadata", {}) and h.get("metadata", {}).get("type") == "dua"]
+    """Executes the hybrid search pipeline scoped for Hisnul Muslim duas.
+    Uses combined vector + BM25 scoring for better keyword matches (Arabic names, categories)."""
+    hits = hybrid_search(query, n_results=n_results, alpha=0.5, where={"type": "dua"})
     if not hits:
         return "No relevant duas found for this query."
     if use_rerank and len(hits) > 1:
@@ -139,11 +149,9 @@ def search_duas(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
     return "\n\n---\n\n".join(formatted)
 
 def search_quran(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
-    """Executes the RAG search pipeline scoped for Quran verses."""
-    hits = search_vector(query, n_results=n_results * 2, where={"type": "quran"})
-    if not hits:
-        bm25_hits = search_bm25(query, n_results=n_results * 2)
-        hits = [h for h in bm25_hits if h.get("metadata", {}) and h.get("metadata", {}).get("type") == "quran"]
+    """Executes the hybrid search pipeline scoped for Quran verses.
+    Uses combined vector + BM25 scoring for better keyword matches (surah names, verse numbers)."""
+    hits = hybrid_search(query, n_results=n_results, alpha=0.5, where={"type": "quran"})
     if not hits:
         return "No relevant Quran verses found for this query."
     if use_rerank and len(hits) > 1:
