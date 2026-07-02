@@ -206,6 +206,16 @@ import litellm
 
 FAILED_PROVIDERS = {}
 
+def is_valid_key(key: Optional[str]) -> bool:
+    if not key:
+        return False
+    val = key.strip().lower()
+    if val in ("", "none", "null"):
+        return False
+    if any(x in val for x in ("your_", "placeholder", "key_here", "token_here", "your-")):
+        return False
+    return True
+
 def _detect_lang(text: str) -> str:
     bengali_chars = sum(1 for c in text if ord(c) in range(0x0980, 0x09FF))
     return "bn" if bengali_chars > 3 else "en"
@@ -241,16 +251,37 @@ async def summarize_history(history: list) -> str:
     system_prompt = "You are a helpful assistant. Summarize the following conversation in 2-3 short sentences. Focus on the main topics discussed, user preferences, and any important context."
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": text}]
     
-    try:
-        res = await litellm.acompletion(
-            model="openrouter/openai/gpt-4o-mini",
-            api_key=OPENROUTER_API_KEY,
-            messages=messages
-        )
-        return res.choices[0].message.content or ""
-    except Exception as e:
-        logger.error(f"Error summarizing history: {e}")
-        return ""
+    models = [
+        ("openrouter/openai/gpt-4o-mini", OPENROUTER_API_KEY),
+        ("groq/llama-3.1-8b-instant", GROQ_API_KEY),
+        ("gemini/gemini-1.5-flash", GEMINI_API_KEY),
+        ("openai/gpt-4o-mini", OPENAI_API_KEY),
+        ("anthropic/claude-3-haiku-20240307", ANTHROPIC_API_KEY),
+        ("xai/grok-2", XAI_API_KEY)
+    ]
+    
+    if is_valid_key(OLLAMA_BASE_URL):
+        models.append((f"ollama/{OLLAMA_MODEL}", None))
+        
+    for model_name, api_key in models:
+        if api_key and not is_valid_key(api_key):
+            continue
+        try:
+            kwargs = {
+                "model": model_name,
+                "messages": messages
+            }
+            if api_key:
+                kwargs["api_key"] = api_key
+            else:
+                kwargs["api_base"] = OLLAMA_BASE_URL
+                
+            res = await litellm.acompletion(**kwargs)
+            return res.choices[0].message.content or ""
+        except Exception as e:
+            logger.error(f"Error summarizing history with {model_name}: {e}")
+            
+    return ""
 
 async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_memory: bool = True) -> Optional[str]:
     from bot.vectordb import get_cached_response, cache_response
@@ -283,13 +314,16 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
         ("gemini/gemini-1.5-flash", GEMINI_API_KEY, "Gemini"),
         ("openai/gpt-4o-mini", OPENAI_API_KEY, "OpenAI"),
         ("anthropic/claude-3-haiku-20240307", ANTHROPIC_API_KEY, "Anthropic"),
-        ("xai/grok-beta", XAI_API_KEY, "xAI")
+        ("xai/grok-2", XAI_API_KEY, "xAI")
     ]
     
+    if is_valid_key(OLLAMA_BASE_URL):
+        models.append((f"ollama/{OLLAMA_MODEL}", "dummy_key", "Ollama"))
+        
     final_res = None
     
     for model_name, api_key, provider_name in models:
-        if not api_key:
+        if provider_name != "Ollama" and not is_valid_key(api_key):
             continue
             
         # Circuit breaker
@@ -307,13 +341,20 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
             
             # Allow up to 3 tool rounds
             for _ in range(3):
-                response = await litellm.acompletion(
-                    model=model_name,
-                    api_key=api_key,
-                    messages=messages,
-                    tools=TOOLS,
-                    temperature=0.7
-                )
+                kwargs = {
+                    "model": model_name,
+                    "messages": messages,
+                    "temperature": 0.7
+                }
+                if api_key and provider_name != "Ollama":
+                    kwargs["api_key"] = api_key
+                if provider_name == "Ollama":
+                    kwargs["api_base"] = OLLAMA_BASE_URL
+                    kwargs["tools"] = TOOLS
+                else:
+                    kwargs["tools"] = TOOLS
+                    
+                response = await litellm.acompletion(**kwargs)
                 message = response.choices[0].message
                 
                 # Track tokens
@@ -351,12 +392,16 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                     "role": "system",
                     "content": "Self-Reflection: You have retrieved data using tools. Before answering, evaluate if this data fully and accurately answers the user's question. If it does, generate a comprehensive answer based ONLY on the retrieved data. If it doesn't, state clearly what information is missing or answer based on what is available without hallucinating."
                 })
-                final_response = await litellm.acompletion(
-                    model=model_name,
-                    api_key=api_key,
-                    messages=messages,
-                    temperature=0.7
-                )
+                kwargs_final = {
+                    "model": model_name,
+                    "messages": messages,
+                    "temperature": 0.7
+                }
+                if api_key and provider_name != "Ollama":
+                    kwargs_final["api_key"] = api_key
+                if provider_name == "Ollama":
+                    kwargs_final["api_base"] = OLLAMA_BASE_URL
+                final_response = await litellm.acompletion(**kwargs_final)
                 final_res = final_response.choices[0].message.content
                 
             FAILED_PROVIDERS.pop(model_name, None) # Success, reset failure
