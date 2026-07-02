@@ -14,6 +14,40 @@ except ImportError:
 CHROMA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "chroma_db")
 COLLECTION_NAME = "knowledge_base"
 MODEL_NAME = "all-MiniLM-L6-v2"
+_METADATA_SKIP_KEYS = frozenset({"content", "id"})
+_METADATA_MAX_STR_LEN = 4000
+
+
+def _build_document_text(post: Dict[str, Any]) -> str:
+    content = post.get("content", "")
+    title = post.get("title", post.get("dua_name", ""))
+    if content and title:
+        return f"{title}\n{content}"
+    return content or title or ""
+
+
+def _sanitize_metadata(post: Dict[str, Any], post_id: str) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {
+        "platform": post.get("platform", "unknown"),
+        "url": post.get("url", ""),
+        "date": post.get("date", ""),
+        "title": post.get("title", post.get("dua_name", "")),
+        "id": post_id,
+    }
+    for key, value in post.items():
+        if key in _METADATA_SKIP_KEYS or key in metadata or value is None:
+            continue
+        if isinstance(value, bool):
+            metadata[key] = value
+        elif isinstance(value, int):
+            metadata[key] = value
+        elif isinstance(value, float):
+            metadata[key] = value
+        elif isinstance(value, str):
+            metadata[key] = value[:_METADATA_MAX_STR_LEN]
+        else:
+            metadata[key] = str(value)[:_METADATA_MAX_STR_LEN]
+    return metadata
 
 class VectorDBManager:
     """Manages connection, collection initialization, and CRUD operations for ChromaDB vector store."""
@@ -63,15 +97,9 @@ class VectorDBManager:
         coll = self.get_collection()
         if not coll:
             return
-        text = f"{post.get('title', '')}\n{post.get('content', '')}"
+        text = _build_document_text(post)
         post_id = post.get("id", f"doc_{hash(text)}")
-        metadata = {
-            "platform": post.get("platform", "unknown"),
-            "url": post.get("url", ""),
-            "date": post.get("date", ""),
-            "title": post.get("title", ""),
-            "id": post_id
-        }
+        metadata = _sanitize_metadata(post, post_id)
         try:
             coll.add(documents=[text], metadatas=[metadata], ids=[post_id])
         except Exception as e:
@@ -81,20 +109,46 @@ class VectorDBManager:
         coll = self.get_collection()
         if not coll or not posts:
             return
-        ids = [p.get("id", f"doc_{hash(p.get('title', '') + p.get('content', ''))}") for p in posts]
-        documents = [f"{p.get('title', '')}\n{p.get('content', '')}" for p in posts]
-        metadatas = [{
-            "platform": p.get("platform", "unknown"),
-            "url": p.get("url", ""),
-            "date": p.get("date", ""),
-            "title": p.get("title", ""),
-            "id": ids[i]
-        } for i, p in enumerate(posts)]
+        ids = [p.get("id", f"doc_{hash(_build_document_text(p))}") for p in posts]
+        documents = [_build_document_text(p) for p in posts]
+        metadatas = [_sanitize_metadata(p, ids[i]) for i, p in enumerate(posts)]
         try:
             coll.add(documents=documents, metadatas=metadatas, ids=ids)
             logger.info(f"Added {len(posts)} documents to vector DB")
         except Exception as e:
             logger.error(f"add_documents batch failed: {e}")
+
+    def delete_by_id_prefix(self, prefix: str) -> int:
+        coll = self.get_collection()
+        if not coll:
+            return 0
+        try:
+            existing = coll.get(include=["metadatas"])
+            if not existing or not existing.get("ids"):
+                return 0
+            ids_to_delete = [
+                doc_id for doc_id in existing["ids"]
+                if doc_id.startswith(prefix)
+            ]
+            if not ids_to_delete:
+                return 0
+            for i in range(0, len(ids_to_delete), 100):
+                coll.delete(ids=ids_to_delete[i:i + 100])
+            return len(ids_to_delete)
+        except Exception as e:
+            logger.error(f"delete_by_id_prefix failed: {e}")
+            return 0
+
+    def count_by_type(self, doc_type: str) -> int:
+        coll = self.get_collection()
+        if not coll:
+            return 0
+        try:
+            results = coll.get(where={"type": doc_type}, include=[])
+            return len(results.get("ids", [])) if results else 0
+        except Exception as e:
+            logger.error(f"count_by_type failed: {e}")
+            return 0
 
     def search_vector(self, query: str, n_results: int = 5, where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         coll = self.get_collection()
@@ -212,6 +266,12 @@ def delete_document(post_id: str) -> None:
 
 def reset_collection() -> None:
     db_manager.reset_collection()
+
+def delete_by_id_prefix(prefix: str) -> int:
+    return db_manager.delete_by_id_prefix(prefix)
+
+def count_by_type(doc_type: str) -> int:
+    return db_manager.count_by_type(doc_type)
 
 class SemanticCacheManager(VectorDBManager):
     def __init__(self):

@@ -176,37 +176,101 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             return
 
     if query.data.startswith("dua_cat:"):
-        category = query.data.split(":")[1]
-        await query.answer(f"Searching for {category} Duas...")
-        from bot.search import search_duas
-        
-        search_query = category
-        if category == "Special":
-            search_query = "special dua"
-        elif category == "Time":
-            search_query = "time for dua"
-        elif category == "Quran":
-            search_query = "quranic dua"
-        elif category == "Event":
-            search_query = "event dua"
-            
-        result = search_duas(search_query)
-        if not result or "No relevant duas found" in result:
-            await query.edit_message_text(f"\U0001f54a No duas found for category: {category}.", parse_mode="HTML")
+        category_slug = query.data.split(":", 1)[1]
+        await query.answer(f"Searching {category_slug} duas...")
+        from bot.search import search_duas_by_category, get_rag_status
+        from bot.handlers.commands import (
+            build_dua_menu_keyboard,
+            build_dua_menu_text,
+            format_empty_rag_message,
+        )
+
+        if not get_rag_status()["dua_ready"]:
+            await query.edit_message_text(format_empty_rag_message("dua"), parse_mode="HTML")
+            return
+
+        from bot.dua_scraper import get_cached_dua_categories
+        cat_name = category_slug
+        for slug, display in get_cached_dua_categories():
+            if slug == category_slug:
+                cat_name = display
+                break
+
+        result, metas = search_duas_by_category(category_slug)
+        buttons = []
+        if metas:
+            # Bookmark row: one button per dua if space permits, or a single "Bookmark all"
+            bm_row = []
+            for meta in metas[:3]:  # Max 3 bookmark buttons per row
+                item_id = meta.get("id", "")
+                dua_name = meta.get("dua_name", "Dua")
+                if item_id:
+                    bm_row.append(InlineKeyboardButton(
+                        f"\U0001f516 {dua_name[:20]}",
+                        callback_data=f"bm_add:{item_id}:dua"
+                    ))
+            if bm_row:
+                buttons.append(bm_row[:2])  # Split into rows of 2 if needed
+                if len(bm_row) > 2:
+                    buttons.append(bm_row[2:])
+        buttons.append([InlineKeyboardButton("⬅️ Back to Dua Menu", callback_data="dua_menu")])
+
+        if not result or "No duas found" in result:
+            await query.edit_message_text(
+                f"\U0001f54a No duas found for this category.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(buttons),
+            )
         else:
             import html
-            message_text = f"\U0001f54a <b>{category} Duas</b>\n\n{html.escape(result)}"
+            message_text = f"\U0001f54a <b>{html.escape(cat_name)}</b>\n\n{html.escape(result)}"
             if len(message_text) > 4000:
                 result_parts = result.split("\n\n---\n\n")
                 safe_result = html.escape("\n\n---\n\n".join(result_parts[:1]))
-                message_text = f"\U0001f54a <b>{category} Duas</b>\n\n{safe_result}\n\n<i>...[Results too long to display fully]</i>"
-                
+                message_text = f"\U0001f54a <b>{html.escape(cat_name)}</b>\n\n{safe_result}\n\n<i>...[Results too long to display fully]</i>"
+
             try:
-                await query.edit_message_text(message_text, parse_mode="HTML")
+                await query.edit_message_text(
+                    message_text,
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(buttons),
+                )
             except Exception as e:
-                from bot.config import logger
                 logger.error(f"Error editing dua message: {e}")
                 await query.edit_message_text("An error occurred while displaying the results. Please try a different query.")
+        return
+
+    if query.data == "dua_menu":
+        from bot.handlers.commands import build_dua_menu_keyboard, build_dua_menu_text
+        await query.answer()
+        await query.edit_message_text(
+            build_dua_menu_text(),
+            parse_mode="HTML",
+            reply_markup=await build_dua_menu_keyboard(),
+        )
+        return
+
+    if query.data == "dua_menu_reload":
+        from bot.handlers.commands import build_dua_menu_keyboard, build_dua_menu_text
+        await query.answer("Loading categories...")
+        await query.edit_message_text(
+            build_dua_menu_text(),
+            parse_mode="HTML",
+            reply_markup=await build_dua_menu_keyboard(),
+        )
+        return
+
+    if query.data.startswith("quran_menu"):
+        from bot.handlers.commands import build_quran_menu_keyboard, build_quran_menu_text
+        page = 1
+        if ":" in query.data:
+            page = max(1, int(query.data.split(":")[1]))
+        await query.answer()
+        await query.edit_message_text(
+            build_quran_menu_text(page=page),
+            parse_mode="HTML",
+            reply_markup=build_quran_menu_keyboard(page=page),
+        )
         return
 
     if query.data.startswith("quran_surah:"):
@@ -214,10 +278,32 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         surah_no = int(parts[1])
         page = int(parts[2])
         await query.answer("Fetching verses...")
-        from bot.search import get_surah_verses
-        result, has_next, has_prev = get_surah_verses(surah_no, page=page, limit=5)
+        from bot.search import get_surah_verses, get_rag_status
+        from bot.handlers.commands import format_empty_rag_message, build_quran_menu_keyboard
+
+        if not get_rag_status()["quran_ready"]:
+            await query.edit_message_text(format_empty_rag_message("quran"), parse_mode="HTML")
+            return
+
+        result, metas, has_next, has_prev = get_surah_verses(surah_no, page=page, limit=5)
         
         buttons = []
+        # Bookmark buttons for displayed verses
+        if metas:
+            bm_row = []
+            for meta in metas[:5]:
+                item_id = meta.get("id", "")
+                ayah_no = meta.get("ayah_no", "")
+                if item_id:
+                    bm_row.append(InlineKeyboardButton(
+                        f"\U0001f516 {ayah_no}",
+                        callback_data=f"bm_add:{item_id}:quran"
+                    ))
+            if bm_row:
+                # Split into rows of ~3
+                for i in range(0, len(bm_row), 3):
+                    buttons.append(bm_row[i:i+3])
+
         nav_buttons = []
         if has_prev:
             nav_buttons.append(InlineKeyboardButton("⬅️ Prev 5", callback_data=f"quran_surah:{surah_no}:{page-1}"))
@@ -226,13 +312,13 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         
         if nav_buttons:
             buttons.append(nav_buttons)
+        buttons.append([InlineKeyboardButton("⬅️ Back to Quran Menu", callback_data="quran_menu:1")])
             
-        reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
+        reply_markup = InlineKeyboardMarkup(buttons)
         
         import html
         message_text = f"\U0001f4dc <b>Quran Surah {surah_no} (Page {page})</b>\n\n{html.escape(result)}"
         
-        # Safely fallback to fewer verses if still exceeding Telegram limits to avoid HTML tag slicing
         if len(message_text) > 4000:
              result_parts = result.split("\n\n---\n\n")
              safe_result = html.escape("\n\n---\n\n".join(result_parts[:2]))
@@ -241,7 +327,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         try:
             await query.edit_message_text(message_text, parse_mode="HTML", reply_markup=reply_markup)
         except Exception as e:
-            from bot.config import logger
             logger.error(f"Error editing quran message: {e}")
             await query.edit_message_text("An error occurred while displaying the verses.")
         return
@@ -257,4 +342,168 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text(f"✅ Language preference successfully set to {lang_name}.")
         else:
             await query.answer("Failed to set language", show_alert=True)
+        return
+
+    if query.data.startswith("remindertime:"):
+        time_pref = query.data.split(":")[1]
+        if time_pref not in ("morning", "evening"):
+            await query.answer("Invalid time preference.", show_alert=True)
+            return
+        user_id = query.from_user.id
+        from bot.database import set_reminder_time, get_subscribed_users
+        subscribed = get_subscribed_users()
+        if user_id not in subscribed:
+            await query.answer("Please /subscribe first!", show_alert=True)
+            return
+        success = set_reminder_time(user_id, time_pref)
+        if success:
+            label = "morning 🌅" if time_pref == "morning" else "evening 🌛"
+            await query.answer(f"Reminder time changed to {label}!")
+            await query.edit_message_text(
+                f"✅ Reminder time successfully set to <b>{label}</b>.\n\n"
+                f"You'll receive your daily Ayah + Dua at the selected time.",
+                parse_mode="HTML",
+            )
+        else:
+            await query.answer("Failed to update time. Try again.", show_alert=True)
+        return
+
+    # ── Bookmark callbacks ──────────────────────────────────────────
+
+    if query.data.startswith("bm_add:"):
+        parts = query.data.split(":")
+        item_id = parts[1]
+        doc_type = parts[2] if len(parts) > 2 else "dua"
+        user_id = query.from_user.id
+        from bot.database import save_bookmark, is_bookmarked
+
+        if is_bookmarked(user_id, item_id):
+            await query.answer("Already bookmarked! \U0001f516", show_alert=True)
+            return
+
+        # Fetch metadata from vector DB to build a nice bookmark
+        from bot.vectordb import get_collection
+        title = ""
+        snippet = ""
+        url = ""
+        try:
+            collection = get_collection()
+            if collection:
+                docs = collection.get(ids=[item_id], include=["metadatas"])
+                if docs and docs.get("metadatas") and docs["metadatas"][0]:
+                    meta = docs["metadatas"][0]
+                    if doc_type == "dua":
+                        title = meta.get("dua_name", meta.get("title", "Dua"))
+                        snippet = meta.get("arabic", "") or meta.get("translation", "")
+                        url = meta.get("url", "")
+                    else:
+                        surah = meta.get("surah_name", "")
+                        ayah = meta.get("ayah_no", "")
+                        title = f"{surah} {ayah}"
+                        snippet = meta.get("arabic", "") or meta.get("translation", "")
+                        surah_no = meta.get("surah_no", "")
+                        if surah_no:
+                            url = f"https://quran.com/{surah_no}/{ayah}"
+        except Exception as e:
+            logger.error(f"Error fetching bookmark metadata: {e}")
+
+        if not title:
+            title = item_id
+
+        success = save_bookmark(user_id, item_id, doc_type, title, snippet, url)
+        if success:
+            await query.answer(f"\U0001f516 Saved! Use /myduas to view.")
+            # Update the button text to show it's bookmarked
+            try:
+                markup = list(query.message.reply_markup.inline_keyboard) if query.message.reply_markup else []
+                new_markup = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton(
+                            btn.text.replace("\U0001f516", "\U0001f4cb"),
+                            callback_data=btn.callback_data.replace("bm_add:", "bm_rm:")
+                        ) if btn.callback_data and btn.callback_data.startswith(f"bm_add:{item_id}") else btn
+                        for btn in row
+                    ]
+                    for row in markup
+                ])
+                await query.edit_message_reply_markup(reply_markup=new_markup)
+            except Exception:
+                pass
+        else:
+            await query.answer("Failed to save bookmark. Try again.", show_alert=True)
+        return
+
+    if query.data.startswith("bm_rm:"):
+        item_id = query.data.split(":", 1)[1]
+        user_id = query.from_user.id
+        from bot.database import remove_bookmark
+
+        success = remove_bookmark(user_id, item_id)
+        if success:
+            await query.answer("\U0001f5d1 Bookmark removed!")
+            # If viewing bookmarks, refresh the list
+            if query.message and query.message.reply_markup:
+                # Check if we're in myduas view
+                markup = list(query.message.reply_markup.inline_keyboard)
+                has_myduas = any(
+                    btn.callback_data and btn.callback_data.startswith("myduas_page")
+                    for row in markup for btn in row
+                )
+                if has_myduas:
+                    from bot.handlers.commands import build_myduas_message
+                    text, kmarkup = build_myduas_message(user_id, page=0)
+                    await query.edit_message_text(text, parse_mode="HTML", reply_markup=kmarkup)
+                else:
+                    # Just update button
+                    try:
+                        new_markup = InlineKeyboardMarkup([
+                            [
+                                InlineKeyboardButton(
+                                    btn.text.replace("\U0001f4cb", "\U0001f516"),
+                                    callback_data=btn.callback_data.replace("bm_rm:", "bm_add:")
+                                ) if btn.callback_data and btn.callback_data.startswith(f"bm_rm:{item_id}") else btn
+                                for btn in row
+                            ]
+                            for row in markup
+                        ])
+                        await query.edit_message_reply_markup(reply_markup=new_markup)
+                    except Exception:
+                        pass
+        else:
+            await query.answer("Failed to remove bookmark.", show_alert=True)
+        return
+
+    if query.data.startswith("bm_view:"):
+        item_id = query.data.split(":", 1)[1]
+        user_id = query.from_user.id
+        from bot.database import get_user_bookmarks
+        bms = get_user_bookmarks(user_id, limit=100)
+        bm = next((b for b in bms if b.get("item_id") == item_id), None)
+        if not bm:
+            await query.answer("Bookmark not found!", show_alert=True)
+            return
+        await query.answer()
+        doc_type = bm.get("type", "dua")
+        title = bm.get("title", item_id)
+        snippet = bm.get("snippet", "")
+        url = bm.get("url", "")
+        text = f"\U0001f516 <b>Bookmark: {title}</b>\n\n"
+        if snippet:
+            text += f"<i>{snippet[:1000]}</i>\n\n"
+        if url:
+            text += f"<a href='{url}'>\U0001f517 View Source</a>"
+        buttons = [
+            [InlineKeyboardButton("\U0001f5d1 Remove", callback_data=f"bm_rm:{item_id}")],
+            [InlineKeyboardButton("⬅️ Back to Bookmarks", callback_data="myduas_page:0")],
+        ]
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if query.data.startswith("myduas_page:"):
+        await query.answer()
+        page = int(query.data.split(":")[1])
+        user_id = query.from_user.id
+        from bot.handlers.commands import build_myduas_message
+        text, markup = build_myduas_message(user_id, page=page)
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=markup)
         return

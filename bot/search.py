@@ -68,13 +68,23 @@ def hybrid_search(query: str, n_results: int = 5, alpha: float = 0.5) -> List[Di
     rescored.sort(key=lambda x: x["score"], reverse=True)
     return rescored[:n_results]
 
+_cross_encoder = None
+
+def _get_cross_encoder():
+    """Lazy-loaded singleton for the cross-encoder model to avoid reloading on every search."""
+    global _cross_encoder
+    if _cross_encoder is None:
+        from sentence_transformers import CrossEncoder
+        _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+    return _cross_encoder
+
+
 def rerank(query: str, hits: List[Dict[str, Any]], top_n: int = 3) -> List[Dict[str, Any]]:
     """Reranks search results using a cross-encoder model for improved accuracy."""
     if not hits:
         return []
     try:
-        from sentence_transformers import CrossEncoder
-        model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+        model = _get_cross_encoder()
         pairs = [[query, hit["text"][:512]] for hit in hits]
         scores = model.predict(pairs)
         for i, hit in enumerate(hits):
@@ -154,14 +164,94 @@ def rebuild_bm25_index() -> None:
     """Public proxy function to trigger BM25 rebuild."""
     _rebuild_bm25()
 
-def get_surah_verses(surah_no: int, page: int = 1, limit: int = 5) -> tuple[str, bool, bool]:
-    """Fetches a paginated list of verses for a specific Surah from the database."""
+def get_rag_status() -> dict:
+    """Returns availability and indexed counts for dua/quran RAG collections."""
+    from bot import vectordb
+    if not vectordb._available():
+        return {
+            "available": False,
+            "dua_count": 0,
+            "quran_count": 0,
+            "dua_ready": False,
+            "quran_ready": False,
+        }
+    dua_count = vectordb.count_by_type("dua")
+    quran_count = vectordb.count_by_type("quran")
+    return {
+        "available": True,
+        "dua_count": dua_count,
+        "quran_count": quran_count,
+        "dua_ready": dua_count > 0,
+        "quran_ready": quran_count > 0,
+    }
+
+def format_rag_status_line(collection: str) -> str:
+    status = get_rag_status()
+    if not status["available"]:
+        return "\u26a0\ufe0f Search index is starting up. Please try again in a moment."
+    if collection == "dua":
+        count = status["dua_count"]
+        if count > 0:
+            return f"\u2705 <b>{count}</b> duas indexed and ready"
+        return "\u23f3 Duas are still being indexed. Categories may take a minute to populate."
+    count = status["quran_count"]
+    if count > 0:
+        return f"\u2705 <b>{count}</b> Quran verses indexed and ready"
+    return "\u23f3 Quran verses are still being indexed. Surah browsing may take a minute."
+
+def search_duas_by_category(category_slug: str, max_results: int = 5) -> tuple[str, list]:
+    """Retrieves duas filtered by exact category slug (e.g., 'morning-and-evening').
+    Uses ChromaDB metadata filtering for exact matches rather than fuzzy vector search.
+    Returns (formatted_text, metadata_list) for bookmark button building.
+    Results are sorted by dua_id for consistent ordering."""
+    from bot.vectordb import get_collection
+    try:
+        collection = get_collection()
+        if not collection:
+            return "Search index is not available.", []
+        results = collection.get(
+            where={"type": "dua", "category": category_slug},
+            include=["metadatas"],
+            limit=max_results * 2
+        )
+        if not results or not results.get("metadatas"):
+            return "No duas found in this category.", []
+        metas = [m for m in results["metadatas"] if m]
+        if not metas:
+            return "No duas found in this category.", []
+        # Sort by dua_id for consistent ordering
+        metas.sort(key=lambda m: m.get("dua_id", 0))
+        displayed = metas[:max_results]
+        formatted = []
+        for meta in displayed:
+            dua_name = meta.get("dua_name", meta.get("title", "Dua"))
+            formatted.append(
+                f"Dua: {dua_name}\n"
+                f"Arabic:\n{meta.get('arabic', '')}\n\n"
+                f"Transliteration:\n{meta.get('transliteration', '')}\n\n"
+                f"Translation:\n{meta.get('translation', '')}\n\n"
+                f"Source: {meta.get('reference', '')}\n"
+                f"URL: {meta.get('url', '')}"
+            )
+        result_text = "\n\n---\n\n".join(formatted)
+        total = len(metas)
+        if total > max_results:
+            result_text += f"\n\n<i>...and {total - max_results} more duas in this category. Use /dua {category_slug} for more.</i>"
+        return result_text, displayed
+    except Exception as e:
+        logger.error(f"Error fetching duas by category: {e}")
+        return "An error occurred while fetching category duas.", []
+
+
+def get_surah_verses(surah_no: int, page: int = 1, limit: int = 5) -> tuple[str, list, bool, bool]:
+    """Fetches a paginated list of verses for a specific Surah from the database.
+    Returns (formatted_text, page_metadatas, has_next, has_prev)."""
     from bot.vectordb import get_collection
     try:
         collection = get_collection()
         results = collection.get(where={"surah_no": surah_no}, include=["metadatas"])
         if not results or not results.get("metadatas"):
-            return "No verses found for this Surah in the database.", False, False
+            return "No verses found for this Surah in the database.", [], False, False
         
         metas = [m for m in results["metadatas"] if m and m.get("type") == "quran"]
         metas.sort(key=lambda x: x.get("ayah_no", 0))
@@ -173,7 +263,7 @@ def get_surah_verses(surah_no: int, page: int = 1, limit: int = 5) -> tuple[str,
         page_metas = metas[start_idx:end_idx]
         
         if not page_metas:
-            return "No verses found on this page.", False, False
+            return "No verses found on this page.", [], False, False
             
         formatted = []
         for meta in page_metas:
@@ -187,7 +277,7 @@ def get_surah_verses(surah_no: int, page: int = 1, limit: int = 5) -> tuple[str,
         has_next = end_idx < total_verses
         has_prev = page > 1
         
-        return "\n\n---\n\n".join(formatted), has_next, has_prev
+        return "\n\n---\n\n".join(formatted), page_metas, has_next, has_prev
     except Exception as e:
         logger.error(f"Error fetching surah verses: {e}")
-        return "An error occurred fetching verses.", False, False
+        return "An error occurred fetching verses.", [], False, False

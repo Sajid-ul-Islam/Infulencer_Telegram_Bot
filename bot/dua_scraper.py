@@ -3,11 +3,18 @@ import httpx
 import json
 import asyncio
 from bot.config import logger
-from bot.vectordb import add_documents, document_exists, get_document_count
+from bot.vectordb import add_documents, document_exists, delete_by_id_prefix, count_by_type
 from bot.search import rebuild_bm25_index
 
 DUA_SOURCE_URL = "https://dua.gtaf.org"
 DUA_COLLECTION_PREFIX = "dua_"
+
+# Module-level category cache populated at startup or on first access.
+# Each entry: (slug, display_name)
+_dua_categories: list = []
+_dua_categories_loaded: bool = False
+# Separate cache for chap_id → slug mapping (preserves real API IDs)
+_chap_id_to_slug: dict = {}
 
 def extract_next_data(html: str) -> dict:
     match = re.search(r'<script id="__NEXT_DATA__"[^>]*type="application/json"[^>]*>({.*?})</script>', html, re.DOTALL)
@@ -42,6 +49,59 @@ async def discover_dua_ids() -> list[int]:
     except Exception as e:
         logger.error(f"Error discovering dua IDs: {e}")
         return []
+
+async def _get_category_map() -> dict:
+    """Fetches chapter category data and populates the _dua_categories cache.
+    Returns {chap_id: slug} mapping for use during dua ingestion."""
+    global _dua_categories, _dua_categories_loaded, _chap_id_to_slug
+    if _dua_categories_loaded and _chap_id_to_slug:
+        return dict(_chap_id_to_slug)
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            response = await client.get(f"{DUA_SOURCE_URL}/en/")
+            response.raise_for_status()
+            json_data = extract_next_data(response.text)
+            if json_data:
+                props = json_data.get("props", {}).get("pageProps", {})
+                cat_data = props.get("chapData", [])
+                if cat_data:
+                    _dua_categories.clear()
+                    _chap_id_to_slug.clear()
+                    seen_slugs = set()
+                    for c in cat_data:
+                        slug = c.get("slug", "")
+                        chap_id = c.get("id")
+                        if slug and slug not in seen_slugs:
+                            seen_slugs.add(slug)
+                            display = c.get("chapname", slug.replace("-", " ").title())
+                            _dua_categories.append((slug, display))
+                        if chap_id is not None:
+                            _chap_id_to_slug[str(chap_id)] = slug
+                    if _dua_categories:
+                        _dua_categories_loaded = True
+                        return dict(_chap_id_to_slug)
+            slugs = re.findall(r'href="/en/([^/]+)/all/"', response.text)
+            if slugs:
+                _dua_categories.clear()
+                _chap_id_to_slug.clear()
+                seen_slugs = set()
+                for i, slug in enumerate(slugs):
+                    if slug not in seen_slugs:
+                        seen_slugs.add(slug)
+                        display = slug.replace("-", " ").title()
+                        _dua_categories.append((slug, display))
+                    _chap_id_to_slug[str(i + 1)] = slug
+                _dua_categories_loaded = True
+                return dict(_chap_id_to_slug)
+            return {}
+    except Exception as e:
+        logger.error(f"Error fetching category map: {e}")
+        return {}
+
+def get_cached_dua_categories() -> list:
+    """Returns cached list of (slug, display_name) tuples.
+    Returns empty list if categories haven't been loaded yet."""
+    return list(_dua_categories)
 
 async def fetch_dua(dua_id: int) -> dict:
     try:
@@ -98,35 +158,6 @@ async def fetch_dua(dua_id: int) -> dict:
         logger.error(f"Error fetching dua {dua_id}: {e}")
         return None
 
-_category_map_cache = None
-
-async def _get_category_map() -> dict:
-    global _category_map_cache
-    if _category_map_cache:
-        return _category_map_cache
-    try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-            response = await client.get(f"{DUA_SOURCE_URL}/en/")
-            response.raise_for_status()
-            json_data = extract_next_data(response.text)
-            if json_data:
-                props = json_data.get("props", {}).get("pageProps", {})
-                cat_data = props.get("chapData", [])
-                if cat_data:
-                    _category_map_cache = {str(c.get("id")): c.get("slug", "general") for c in cat_data}
-                    if _category_map_cache:
-                        return _category_map_cache
-            slugs = re.findall(r'href="/en/([^/]+)/all/"', response.text)
-            chap_elements = re.findall(r'data-chap-id="(\d+)"', response.text)
-            if slugs and not chap_elements:
-                _category_map_cache = {str(i+1): slug for i, slug in enumerate(slugs)}
-            elif slugs and chap_elements:
-                _category_map_cache = {chap_elements[i]: slug for i, slug in enumerate(slugs) if i < len(chap_elements)}
-            return _category_map_cache or {}
-    except Exception as e:
-        logger.error(f"Error fetching category map: {e}")
-        return {}
-
 async def get_dua_stats() -> dict:
     dua_count = 0
     try:
@@ -147,19 +178,14 @@ async def ingest_all_duas(force_reindex: bool = False, progress_callback=None) -
         logger.warning("No dua IDs discovered")
         return 0
     logger.info(f"Discovered {len(ids)} duas")
-    if force_reindex:
-        from bot.vectordb import get_collection
-        collection = get_collection()
-        existing = collection.get(include=["metadatas"])
-        if existing and existing["ids"]:
-            dua_ids_to_delete = [existing["ids"][i] for i, m in enumerate(existing["metadatas"]) if m and m.get("type") == "dua"]
-            if dua_ids_to_delete:
-                for i in range(0, len(dua_ids_to_delete), 100):
-                    batch = dua_ids_to_delete[i:i+100]
-                    try:
-                        collection.delete(ids=batch)
-                    except Exception as e:
-                        logger.error(f"Error deleting batch: {e}")
+
+    indexed_count = count_by_type("dua")
+    if force_reindex or indexed_count == 0:
+        deleted = delete_by_id_prefix(DUA_COLLECTION_PREFIX)
+        if deleted:
+            logger.info(f"Removed {deleted} stale dua documents before re-indexing")
+        force_reindex = True
+
     new_count = 0
     batch = []
     for i, dua_id in enumerate(ids):

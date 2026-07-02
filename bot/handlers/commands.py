@@ -9,8 +9,92 @@ from bot.ai import get_ai_response
 from bot.database import track_activity
 from bot.memory import clear_history, get_history_count
 from bot.pipeline import ingest_knowledge_base, ingest_rss_content, get_pipeline_stats
-from bot.search import search_duas, search_quran
+from bot.search import search_duas, search_quran, format_rag_status_line, get_rag_status
 from bot.handlers.feedback import FEEDBACK_POSITIVE, FEEDBACK_NEGATIVE
+
+
+def build_dua_menu_text() -> str:
+    return (
+        "\U0001f54a <b>Search Islamic Duas</b>\n\n"
+        f"{format_rag_status_line('dua')}\n\n"
+        "Choose a category below, or search with:\n"
+        "<code>/dua sleeping</code>\n"
+        "<code>/dua travel</code>"
+    )
+
+
+async def build_dua_menu_keyboard() -> InlineKeyboardMarkup:
+    """Builds the dua category menu from cached chapter data."""
+    from bot.dua_scraper import get_cached_dua_categories
+    categories = get_cached_dua_categories()
+    if not categories:
+        # Fallback if categories not loaded yet — just show a loading state
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("\u23f3 Loading categories...", callback_data="dua_menu_reload")]
+        ])
+    buttons = []
+    for slug, display_name in categories:
+        buttons.append([
+            InlineKeyboardButton(display_name, callback_data=f"dua_cat:{slug}")
+        ])
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_quran_menu_text(page: int = 1) -> str:
+    return (
+        "\U0001f4dc <b>Read & Search the Quran</b>\n\n"
+        f"{format_rag_status_line('quran')}\n\n"
+        "Tap a Surah to read verses, or search with:\n"
+        "<code>/quran yasin</code>\n"
+        "<code>/quran mercy</code>\n\n"
+        f"<i>Showing Surahs {max(1, (page - 1) * 14 + 1)}–{min(114, page * 14)}</i>"
+    )
+
+
+def build_quran_menu_keyboard(page: int = 1) -> InlineKeyboardMarkup:
+    from bot.quran_scraper import SURAH_NAMES
+
+    per_page = 14
+    start = (page - 1) * per_page + 1
+    end = min(page * per_page, 114)
+    buttons = []
+    for surah_no in range(start, end + 1):
+        if surah_no not in SURAH_NAMES:
+            continue
+        name, arabic, english, _, _ = SURAH_NAMES[surah_no]
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    f"{surah_no}. {name} — {arabic}",
+                    callback_data=f"quran_surah:{surah_no}:1",
+                )
+            ]
+        )
+
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"quran_menu:{page - 1}"))
+    if end < 114:
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"quran_menu:{page + 1}"))
+    if nav_row:
+        buttons.append(nav_row)
+
+    return InlineKeyboardMarkup(buttons)
+
+
+def format_empty_rag_message(collection: str) -> str:
+    status = get_rag_status()
+    if not status["available"]:
+        return "\u26a0\ufe0f The search index is still starting. Please try again in a minute."
+    if collection == "dua":
+        return (
+            "\U0001f54a Duas are still being indexed in the background.\n\n"
+            "Please wait a minute and tap /dua again, or ask with /ask."
+        )
+    return (
+        "\U0001f4dc Quran verses are still being indexed in the background.\n\n"
+        "Please wait a minute and tap /quran again, or ask with /ask."
+    )
 
 
 def clean_command_query(text: str, command: str) -> str:
@@ -180,29 +264,22 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def dua_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = clean_command_query(update.message.text, "dua")
     if not query:
-        keyboard = InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("Special Duas", callback_data="dua_cat:Special")],
-                [InlineKeyboardButton("Best time for dua reminder", callback_data="dua_cat:Time")],
-                [InlineKeyboardButton("Quranic Duas", callback_data="dua_cat:Quran")],
-                [InlineKeyboardButton("Event Duas", callback_data="dua_cat:Event")],
-            ]
-        )
         await update.message.reply_text(
-            "\U0001f54a <b>Search Islamic Duas</b>\n\n"
-            "Choose a category below, or search specifically using:\n"
-            "Usage: /dua <search query>\n"
-            "Example: /dua dua for sleeping",
+            build_dua_menu_text(),
             parse_mode="HTML",
-            reply_markup=keyboard,
+            reply_markup=await build_dua_menu_keyboard(),
         )
         return
 
     await update.message.chat.send_action(ChatAction.TYPING)
+    if not get_rag_status()["dua_ready"]:
+        await update.message.reply_text(format_empty_rag_message("dua"), parse_mode="HTML")
+        return
+
     result = search_duas(query)
     if not result or "No relevant duas found" in result:
         await update.message.reply_text(
-            "\U0001f54a No duas found for your query. Try different keywords or ask the AI directly with /ask.",
+            "\U0001f54a No duas found for your query. Try different keywords or tap /dua for the category menu.",
             parse_mode="HTML",
         )
         return
@@ -230,37 +307,22 @@ async def dua_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def quran_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = clean_command_query(update.message.text, "quran")
     if not query:
-        from bot.quran_scraper import SURAH_NAMES
-
-        buttons = []
-        for i in range(105, 115):
-            if i in SURAH_NAMES:
-                name = SURAH_NAMES[i][0]
-                arabic = SURAH_NAMES[i][1]
-                buttons.append(
-                    [
-                        InlineKeyboardButton(
-                            f"{i}. {name} - {arabic}",
-                            callback_data=f"quran_surah:{i}:1",
-                        )
-                    ]
-                )
-        keyboard = InlineKeyboardMarkup(buttons)
         await update.message.reply_text(
-            "\U0001f4dc <b>Read the Quran</b>\n\n"
-            "Select a Surah below (last 10 Surahs), or search for a specific verse/Surah:\n"
-            "Usage: /quran <search query>\n"
-            "Example: /quran Surah Yasin",
+            build_quran_menu_text(page=1),
             parse_mode="HTML",
-            reply_markup=keyboard,
+            reply_markup=build_quran_menu_keyboard(page=1),
         )
         return
 
     await update.message.chat.send_action(ChatAction.TYPING)
+    if not get_rag_status()["quran_ready"]:
+        await update.message.reply_text(format_empty_rag_message("quran"), parse_mode="HTML")
+        return
+
     result = search_quran(query)
     if not result or "No relevant Quran verses found" in result:
         await update.message.reply_text(
-            "\U0001f4dc No Quran verses found for your query. Try different keywords or ask the AI directly with /ask.",
+            "\U0001f4dc No Quran verses found for your query. Try different keywords or tap /quran for the Surah menu.",
             parse_mode="HTML",
         )
         return
@@ -340,12 +402,23 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
-    from bot.database import subscribe_user
+    from bot.database import subscribe_user, set_reminder_time
+
+    query = clean_command_query(update.message.text, "subscribe").lower()
+    time_pref = "morning"
+    if query in ("morning", "evening"):
+        time_pref = query
 
     success = subscribe_user(user_id, username)
     if success:
+        set_reminder_time(user_id, time_pref)
+        time_label = "morning \U0001f305" if time_pref == "morning" else "evening \U0001f31b"
         await update.message.reply_text(
-            "\u2705 <b>Subscribed!</b>\n\nYou will now receive daily Islamic reminders (Duas and Quran Verses).",
+            f"\u2705 <b>Subscribed!</b>\n\n"
+            f"You will receive daily Islamic reminders in the <b>{time_label}</b>.\n"
+            f"Each reminder includes an Ayah of the Day and a Dua of the Day.\n\n"
+            f"To change your time, use:\n"
+            f"<code>/subscribe morning</code> or <code>/subscribe evening</code>",
             parse_mode="HTML",
         )
     else:
@@ -360,11 +433,116 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     success = unsubscribe_user(user_id)
     if success:
         await update.message.reply_text(
-            "\u274c <b>Unsubscribed!</b>\n\nYou will no longer receive daily Islamic reminders.",
+            "\u274c <b>Unsubscribed!</b>\n\nYou will no longer receive daily Islamic reminders.\n\n"
+            "To resubscribe, use /subscribe (add <code>morning</code> or <code>evening</code> for time preference).",
             parse_mode="HTML",
         )
     else:
         await update.message.reply_text("Failed to unsubscribe. Please try again later.")
+
+
+@track_usage("remindertime")
+async def reminder_time_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Allows users to change their reminder time without resubscribing."""
+    user_id = update.effective_user.id
+    query = clean_command_query(update.message.text, "remindertime").lower()
+
+    from bot.database import get_reminder_time, set_reminder_time, get_subscribed_users
+
+    if query in ("morning", "evening"):
+        # Check if user is subscribed first
+        subscribed_users = get_subscribed_users()
+        if user_id not in subscribed_users:
+            await update.message.reply_text(
+                "\u26a0\ufe0f You are not subscribed. Use /subscribe first, or use:\n"
+                f"<code>/subscribe {query}</code>",
+                parse_mode="HTML",
+            )
+            return
+        success = set_reminder_time(user_id, query)
+        if success:
+            time_label = "morning \U0001f305" if query == "morning" else "evening \U0001f31b"
+            await update.message.reply_text(
+                f"\u2705 Reminder time changed to <b>{time_label}</b>.",
+                parse_mode="HTML",
+            )
+        else:
+            await update.message.reply_text("Failed to update reminder time. Please try again later.")
+        return
+
+    current = get_reminder_time(user_id)
+    current_label = "morning \U0001f305" if current == "morning" else "evening \U0001f31b"
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("\U0001f305 Morning (10:00 AM)", callback_data="remindertime:morning")],
+            [InlineKeyboardButton("\U0001f31b Evening (6:00 PM)", callback_data="remindertime:evening")],
+        ]
+    )
+    await update.message.reply_text(
+        f"\u23f0 <b>Reminder Time Preference</b>\n\n"
+        f"Current: <b>{current_label}</b>\n\n"
+        f"Choose when you'd like to receive your daily Islamic reminder:\n"
+        f"<b>Morning</b> — Ayah + Dua at 10:00 AM\n"
+        f"<b>Evening</b> — Ayah + Dua at 6:00 PM",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+
+@track_usage("myduas")
+async def myduas_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows the user's saved bookmarks with pagination."""
+    user_id = update.effective_user.id
+    text, markup = build_myduas_message(user_id, page=0)
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=markup)
+
+
+def build_myduas_message(user_id: int, page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
+    """Builds the bookmark list message and keyboard. Page 0 = most recent."""
+    from bot.database import get_user_bookmarks, get_bookmark_count
+    per_page = 5
+    bookmarks = get_user_bookmarks(user_id, limit=per_page, offset=page * per_page)
+    total = get_bookmark_count(user_id)
+
+    if not bookmarks:
+        text = (
+            "\U0001f516 <b>My Bookmarked Duas & Ayahs</b>\n\n"
+            "You haven't saved any bookmarks yet.\n\n"
+            "When browsing duas or Quran verses, tap the \U0001f516 button to save them here."
+        )
+        return text, InlineKeyboardMarkup([])
+
+    lines = ["\U0001f516 <b>My Bookmarked Duas & Ayahs</b>\n"]
+    buttons = []
+
+    for i, bm in enumerate(bookmarks, start=page * per_page + 1):
+        doc_type = bm.get("type", "dua")
+        icon = "\U0001f54a" if doc_type == "dua" else "\U0001f4dc"
+        title = bm.get("title", bm.get("item_id", ""))
+        snippet = bm.get("snippet", "")[:60]
+        item_id = bm.get("item_id", "")
+        lines.append(f"{i}. {icon} <b>{title}</b>")
+        if snippet:
+            lines.append(f"   <i>{snippet}...</i>")
+        # Row: View + Remove per bookmark
+        buttons.append([
+            InlineKeyboardButton(f"\U0001f441 View #{i}", callback_data=f"bm_view:{item_id}"),
+            InlineKeyboardButton(f"\U0001f5d1 Remove", callback_data=f"bm_rm:{item_id}"),
+        ])
+
+    # Pagination
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"myduas_page:{page - 1}"))
+    if page + 1 < total_pages:
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"myduas_page:{page + 1}"))
+    if nav_row:
+        buttons.append(nav_row)
+
+    lines.append(f"\n\U0001f4cb <i>Page {page + 1} of {total_pages} ({total} total)</i>")
+
+    return "\n".join(lines), InlineKeyboardMarkup(buttons)
 
 
 @track_usage("language")

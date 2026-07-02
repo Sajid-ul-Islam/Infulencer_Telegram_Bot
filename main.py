@@ -20,12 +20,12 @@ def start_background_services():
     
     ping_thread = threading.Thread(target=ping_self, daemon=True)
     ping_thread.start()
-from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, greeting_post, weekly_digest, daily_islamic_reminder
+from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, greeting_post, weekly_digest, daily_islamic_reminder, evening_islamic_reminder
 from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses
 from bot.handlers.commands import (
     start, socials_command, latest, youtube, medium, substack,
     ask_command, dua_command, quran_command, forget_command, ingest_command, help_command,
-    subscribe_command, unsubscribe_command, language_command
+    subscribe_command, unsubscribe_command, language_command, reminder_time_command, myduas_command
 )
 from bot.handlers.admin import (
     postlatest_command, ban_command, mute_command, questions_command,
@@ -43,19 +43,36 @@ async def background_init(app):
         logger.info("FAQs loaded from Firestore.")
     except Exception as e:
         logger.warning(f"FAQ loading failed (non-blocking): {e}")
+    # Pre-load dua categories so the menu shows real chapter names immediately
+    try:
+        from bot.dua_scraper import _get_category_map
+        cat_map = await _get_category_map()
+        logger.info(f"Loaded {len(cat_map)} dua categories from source.")
+    except Exception as e:
+        logger.warning(f"Dua category loading failed (non-blocking): {e}")
     try:
         await loop.run_in_executor(None, lambda: ingest_knowledge_base(reindex=False))
         logger.info("Knowledge base ingested.")
     except Exception as e:
         logger.warning(f"KB ingestion failed (non-blocking): {e}")
     try:
-        await ingest_duas(force_reindex=False)
+        dua_count = await ingest_duas(force_reindex=False)
+        logger.info(f"Dua ingestion complete: {dua_count} new duas indexed.")
     except Exception as e:
         logger.warning(f"Dua ingestion failed (non-blocking): {e}")
     try:
-        await ingest_quran_verses(force_reindex=False)
+        quran_count = await ingest_quran_verses(force_reindex=False)
+        logger.info(f"Quran ingestion complete: {quran_count} new verses indexed.")
     except Exception as e:
         logger.warning(f"Quran ingestion failed (non-blocking): {e}")
+    try:
+        from bot.search import get_rag_status
+        status = get_rag_status()
+        logger.info(
+            f"RAG status — duas: {status['dua_count']}, quran: {status['quran_count']}, available: {status['available']}"
+        )
+    except Exception as e:
+        logger.warning(f"RAG status check failed: {e}")
 
 async def post_init(application: Application):
     try:
@@ -120,6 +137,8 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("subscribe", subscribe_command))
     application.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
+    application.add_handler(CommandHandler("remindertime", reminder_time_command))
+    application.add_handler(CommandHandler("myduas", myduas_command))
     application.add_handler(CommandHandler("socials", socials_command))
     application.add_handler(CommandHandler("latest", latest))
     application.add_handler(CommandHandler("youtube", youtube))
@@ -160,6 +179,7 @@ def main():
 
     job_queue = application.job_queue
     job_queue.run_daily(daily_islamic_reminder, time=datetime.time(10, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
+    job_queue.run_daily(evening_islamic_reminder, time=datetime.time(18, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
     job_queue.run_daily(auto_post_youtube, time=datetime.time(9, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
     job_queue.run_daily(auto_post_medium, time=datetime.time(18, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
     job_queue.run_daily(auto_post_substack, time=datetime.time(14, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))

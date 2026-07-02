@@ -319,3 +319,139 @@ def get_user_language(user_id: int) -> Optional[str]:
     except Exception as e:
         logger.error(f"Error getting user language for {user_id}: {e}")
         return None
+
+
+def set_reminder_time(user_id: int, time_pref: str) -> bool:
+    """Sets the user's reminder time preference: 'morning' or 'evening'."""
+    if time_pref not in ("morning", "evening"):
+        return False
+    if not db:
+        return False
+    try:
+        db.collection("subscriptions").document(str(user_id)).set({
+            "reminder_time": time_pref
+        }, merge=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error setting reminder time for {user_id}: {e}")
+        return False
+
+
+def get_reminder_time(user_id: int) -> str:
+    """Returns the user's reminder time preference, defaulting to 'morning'."""
+    if not db:
+        return "morning"
+    try:
+        doc = db.collection("subscriptions").document(str(user_id)).get()
+        if doc.exists:
+            return doc.to_dict().get("reminder_time", "morning")
+        return "morning"
+    except Exception as e:
+        logger.error(f"Error getting reminder time for {user_id}: {e}")
+        return "morning"
+
+
+def get_subscribed_users_by_time(time_pref: str) -> list[int]:
+    """Returns user IDs of subscribed users with a specific time preference.
+    'morning' returns users with reminder_time='morning' or unset (default).
+    'evening' returns only users with reminder_time='evening'."""
+    if not db:
+        return []
+    try:
+        docs = db.collection("subscriptions").stream()
+        users = []
+        for doc in docs:
+            data = doc.to_dict()
+            user_id = data.get("user_id")
+            if not user_id:
+                continue
+            user_time = data.get("reminder_time", "morning")
+            if time_pref == "morning":
+                if user_time == "morning":
+                    users.append(user_id)
+            else:
+                if user_time == "evening":
+                    users.append(user_id)
+        return users
+    except Exception as e:
+        logger.error(f"Error getting subscribed users by time: {e}")
+        return []
+
+
+BOOKMARKS_COLLECTION = "user_bookmarks"
+
+def save_bookmark(user_id: int, item_id: str, doc_type: str, title: str, snippet: str, url: str = "") -> bool:
+    """Saves a bookmark. item_id is the unique ID from the vector DB (e.g. 'dua_42', 'quran_1_1')."""
+    if not db:
+        return False
+    try:
+        doc_ref = db.collection(BOOKMARKS_COLLECTION).document(str(user_id)).collection("items").document(item_id)
+        doc_ref.set({
+            "user_id": user_id,
+            "item_id": item_id,
+            "type": doc_type,
+            "title": title,
+            "snippet": snippet[:300],
+            "url": url,
+            "saved_at": google_firestore.SERVER_TIMESTAMP
+        })
+        return True
+    except Exception as e:
+        logger.error(f"Error saving bookmark for {user_id}: {e}")
+        return False
+
+
+def remove_bookmark(user_id: int, item_id: str) -> bool:
+    """Removes a bookmark by item_id for the given user."""
+    if not db:
+        return False
+    try:
+        db.collection(BOOKMARKS_COLLECTION).document(str(user_id)).collection("items").document(item_id).delete()
+        return True
+    except Exception as e:
+        logger.error(f"Error removing bookmark {item_id} for {user_id}: {e}")
+        return False
+
+
+def get_user_bookmarks(user_id: int, limit: int = 10, offset: int = 0) -> list[dict]:
+    """Returns a paginated list of bookmarks for the user, newest first."""
+    if not db:
+        return []
+    try:
+        docs = (
+            db.collection(BOOKMARKS_COLLECTION)
+            .document(str(user_id))
+            .collection("items")
+            .order_by("saved_at", direction="DESCENDING")
+            .limit(limit)
+            .offset(offset)
+            .stream()
+        )
+        return [doc.to_dict() for doc in docs]
+    except Exception as e:
+        logger.error(f"Error getting bookmarks for {user_id}: {e}")
+        return []
+
+
+def is_bookmarked(user_id: int, item_id: str) -> bool:
+    """Checks if a specific item is already bookmarked by the user."""
+    if not db:
+        return False
+    try:
+        doc = db.collection(BOOKMARKS_COLLECTION).document(str(user_id)).collection("items").document(item_id).get()
+        return doc.exists
+    except Exception as e:
+        logger.error(f"Error checking bookmark {item_id} for {user_id}: {e}")
+        return False
+
+
+def get_bookmark_count(user_id: int) -> int:
+    """Returns the total number of bookmarks for the user."""
+    if not db:
+        return 0
+    try:
+        docs = db.collection(BOOKMARKS_COLLECTION).document(str(user_id)).collection("items").stream()
+        return len(list(docs))
+    except Exception as e:
+        logger.error(f"Error counting bookmarks for {user_id}: {e}")
+        return 0

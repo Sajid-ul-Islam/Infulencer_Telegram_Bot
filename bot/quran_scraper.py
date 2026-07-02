@@ -1,7 +1,7 @@
 import httpx
 import asyncio
 from bot.config import logger
-from bot.vectordb import add_documents, document_exists
+from bot.vectordb import add_documents, document_exists, delete_by_id_prefix, count_by_type
 from bot.search import rebuild_bm25_index
 
 API_BASE = "https://data.gtaf.org/api"
@@ -189,19 +189,13 @@ def build_ayah_document(surah_no: int, verse_data: dict, translation_text: str) 
     }
 
 async def ingest_quran(force_reindex: bool = False, progress_callback=None) -> int:
-    if force_reindex:
-        from bot.vectordb import get_collection
-        collection = get_collection()
-        existing = collection.get(include=["metadatas"])
-        if existing and existing["ids"]:
-            quran_ids = [existing["ids"][i] for i, m in enumerate(existing["metadatas"]) if m and m.get("type") == "quran"]
-            if quran_ids:
-                for i in range(0, len(quran_ids), 100):
-                    batch = quran_ids[i:i+100]
-                    try:
-                        collection.delete(ids=batch)
-                    except Exception as e:
-                        logger.error(f"Error deleting quran batch: {e}")
+    indexed_count = count_by_type("quran")
+    if force_reindex or indexed_count == 0:
+        deleted = delete_by_id_prefix(QURAN_COLLECTION_PREFIX)
+        if deleted:
+            logger.info(f"Removed {deleted} stale Quran documents before re-indexing")
+        force_reindex = True
+
     new_count = 0
     batch = []
     surahs_processed = 0

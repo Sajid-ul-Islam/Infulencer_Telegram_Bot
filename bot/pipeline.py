@@ -144,21 +144,9 @@ async def ingest_quran_verses(force_reindex: bool = False) -> int:
 def get_pipeline_stats() -> dict:
     if not _vdb_available:
         return {"vector_documents": 0, "kb_entries": len(load_knowledge_base()), "dua_count": 0, "quran_count": 0}
-    dua_count = 0
-    quran_count = 0
-    try:
-        client = vectordb.get_client()
-        if client:
-            collection = client.get_collection("knowledge_base")
-            all_docs = collection.get(include=["metadatas"])
-            if all_docs and all_docs["metadatas"]:
-                dua_count = sum(1 for m in all_docs["metadatas"] if m and m.get("type") == "dua")
-                quran_count = sum(1 for m in all_docs["metadatas"] if m and m.get("type") == "quran")
-    except Exception:
-        pass
     return {
         "vector_documents": vectordb.get_document_count(),
         "kb_entries": len(load_knowledge_base()),
-        "dua_count": dua_count,
-        "quran_count": quran_count
+        "dua_count": vectordb.count_by_type("dua"),
+        "quran_count": vectordb.count_by_type("quran"),
     }
