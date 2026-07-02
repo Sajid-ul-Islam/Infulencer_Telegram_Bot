@@ -232,6 +232,23 @@ async def ingest_quran(force_reindex: bool = False, progress_callback=None) -> i
     logger.info(f"Ingested {new_count} new Quran verses from {surahs_processed} surahs")
     return new_count
 
+def get_global_verse_number(surah_no: int, ayah_no: int) -> int:
+    """Converts surah_no + ayah_no to the global verse number (1-6236).
+    Uses the verse counts from SURAH_NAMES to sum previous surahs."""
+    global_idx = 0
+    for s in range(1, surah_no):
+        if s in SURAH_NAMES:
+            global_idx += SURAH_NAMES[s][3]  # verse count is index 3
+    return global_idx + ayah_no
+
+
+def get_verse_audio_url(surah_no: int, ayah_no: int, reciter: str = "ar.alafasy") -> str:
+    """Returns the Al-Quran Cloud CDN URL for a verse's audio recitation.
+    Pattern: https://cdn.islamic.network/quran/audio/128/{reciter}/{global_verse}.mp3"""
+    global_verse = get_global_verse_number(surah_no, ayah_no)
+    return f"https://cdn.islamic.network/quran/audio/128/{reciter}/{global_verse}.mp3"
+
+
 async def get_quran_stats() -> dict:
     quran_count = 0
     try:

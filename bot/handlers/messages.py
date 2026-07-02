@@ -288,19 +288,32 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         result, metas, has_next, has_prev = get_surah_verses(surah_no, page=page, limit=5)
         
         buttons = []
-        # Bookmark buttons for displayed verses
+        # Audio + Bookmark buttons for displayed verses
         if metas:
+            from bot.quran_scraper import get_verse_audio_url
+            # Audio row: one "Listen" button per verse
+            audio_row = []
             bm_row = []
             for meta in metas[:5]:
                 item_id = meta.get("id", "")
                 ayah_no = meta.get("ayah_no", "")
+                # Audio button
+                audio_url = get_verse_audio_url(surah_no, ayah_no)
+                audio_row.append(InlineKeyboardButton(
+                    f"\u25b6\ufe0f {ayah_no}",
+                    url=audio_url
+                ))
+                # Bookmark button
                 if item_id:
                     bm_row.append(InlineKeyboardButton(
                         f"\U0001f516 {ayah_no}",
                         callback_data=f"bm_add:{item_id}:quran"
                     ))
+            if audio_row:
+                # Split audio buttons into rows of ~3
+                for i in range(0, len(audio_row), 3):
+                    buttons.append(audio_row[i:i+3])
             if bm_row:
-                # Split into rows of ~3
                 for i in range(0, len(bm_row), 3):
                     buttons.append(bm_row[i:i+3])
 
@@ -492,10 +505,22 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             text += f"<i>{snippet[:1000]}</i>\n\n"
         if url:
             text += f"<a href='{url}'>\U0001f517 View Source</a>"
-        buttons = [
-            [InlineKeyboardButton("\U0001f5d1 Remove", callback_data=f"bm_rm:{item_id}")],
-            [InlineKeyboardButton("⬅️ Back to Bookmarks", callback_data="myduas_page:0")],
-        ]
+        buttons = []
+        # Add audio button for quran bookmarks
+        if doc_type == "quran":
+            from bot.quran_scraper import get_verse_audio_url
+            # Extract surah_no and ayah_no from item_id (format: quran_{surah}_{ayah})
+            parts = item_id.split("_")
+            if len(parts) >= 3:
+                try:
+                    bm_surah = int(parts[1])
+                    bm_ayah = int(parts[2])
+                    audio_url = get_verse_audio_url(bm_surah, bm_ayah)
+                    buttons.append([InlineKeyboardButton("\u25b6\ufe0f Listen to Recitation", url=audio_url)])
+                except (ValueError, IndexError):
+                    pass
+        buttons.append([InlineKeyboardButton("\U0001f5d1 Remove", callback_data=f"bm_rm:{item_id}")])
+        buttons.append([InlineKeyboardButton("⬅️ Back to Bookmarks", callback_data="myduas_page:0")])
         await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
         return
 

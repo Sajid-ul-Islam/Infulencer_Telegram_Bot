@@ -150,30 +150,40 @@ def _build_dua_message(dua_meta: dict) -> str:
 
 
 def _build_reminder_keyboard(ayah_meta: Optional[dict], dua_meta: Optional[dict]) -> InlineKeyboardMarkup:
+    from bot.quran_scraper import get_verse_audio_url
     buttons = []
-    # Read more links
-    read_buttons = []
+    # Audio + Read more links
+    ayah_buttons = []
     if ayah_meta:
         surah_no = ayah_meta.get("surah_no", "")
         ayah_no = ayah_meta.get("ayah_no", "")
         if surah_no and ayah_no:
-            read_buttons.append(
+            # Listen button
+            audio_url = get_verse_audio_url(surah_no, ayah_no)
+            ayah_buttons.append(
                 InlineKeyboardButton(
-                    "\U0001f4d6 Read Ayah",
+                    "\u25b6\ufe0f Listen",
+                    url=audio_url
+                )
+            )
+            # Read button
+            ayah_buttons.append(
+                InlineKeyboardButton(
+                    "\U0001f4d6 Read",
                     url=f"https://quran.com/{surah_no}/{ayah_no}"
                 )
             )
     if dua_meta:
         dua_url = dua_meta.get("url", "")
         if dua_url:
-            read_buttons.append(
+            ayah_buttons.append(
                 InlineKeyboardButton(
                     "\U0001f54a View Dua",
                     url=dua_url
                 )
             )
-    if read_buttons:
-        buttons.append(read_buttons)
+    if ayah_buttons:
+        buttons.append(ayah_buttons)
     # Share button — only show if we have at least one source to link
     share_url = None
     share_text = ""
