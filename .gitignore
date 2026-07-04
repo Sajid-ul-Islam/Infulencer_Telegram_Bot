@@ -6,3 +6,7 @@ venv/
 env/
 bot_database.db
 *.db
+
+# Runtime data stores
+documents_store.json
+chroma_db/
