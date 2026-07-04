@@ -158,17 +158,8 @@ async def fetch_dua(dua_id: int) -> dict:
         return None
 
 async def get_dua_stats() -> dict:
-    dua_count = 0
-    try:
-        all_docs = []
-        from bot.vectordb import get_client
-        client = get_client()
-        collection = client.get_collection("knowledge_base")
-        all_docs = collection.get(include=["metadatas"])
-        if all_docs and all_docs["metadatas"]:
-            dua_count = sum(1 for m in all_docs["metadatas"] if m and m.get("type") == "dua")
-    except Exception:
-        pass
+    from bot.vectordb import count_by_type
+    dua_count = count_by_type("dua")
     return {"indexed_duas": dua_count}
 
 async def ingest_all_duas(force_reindex: bool = False, progress_callback=None) -> int:

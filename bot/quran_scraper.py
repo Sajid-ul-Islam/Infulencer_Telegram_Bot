@@ -250,14 +250,6 @@ def get_verse_audio_url(surah_no: int, ayah_no: int, reciter: str = "ar.alafasy"
 
 
 async def get_quran_stats() -> dict:
-    quran_count = 0
-    try:
-        from bot.vectordb import get_client
-        client = get_client()
-        collection = client.get_collection("knowledge_base")
-        all_docs = collection.get(include=["metadatas"])
-        if all_docs and all_docs["metadatas"]:
-            quran_count = sum(1 for m in all_docs["metadatas"] if m and m.get("type") == "quran")
-    except Exception:
-        pass
+    from bot.vectordb import count_by_type
+    quran_count = count_by_type("quran")
     return {"indexed_verses": quran_count, "total_surahs": 114}

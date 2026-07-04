@@ -83,13 +83,17 @@ def hybrid_search(query: str, n_results: int = 5, alpha: float = 0.5, where: Opt
 _cross_encoder = None
 
 def _get_cross_encoder():
-    """Lazy-loaded singleton for the cross-encoder model to avoid reloading on every search.
-    Gracefully returns None if the model fails to load (e.g. out-of-memory on Render free tier)."""
+    """Lazy-loaded singleton for the cross-encoder model.
+    Gracefully returns None if sentence-transformers is not installed
+    or the model fails to load (e.g. out-of-memory on Render free tier)."""
     global _cross_encoder
     if _cross_encoder is None:
         try:
             from sentence_transformers import CrossEncoder
             _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+        except ImportError:
+            logger.info("sentence-transformers not installed — cross-encoder reranking unavailable")
+            _cross_encoder = None
         except Exception as e:
             logger.warning(f"Failed to load cross-encoder model (reranking disabled): {e}")
             _cross_encoder = None
@@ -225,7 +229,7 @@ def search_duas_by_category(category_slug: str, max_results: int = 5) -> tuple[s
         collection = get_collection()
         if not collection:
             return "Search index is not available.", []
-        results = collection.get(
+        results = collection.query_documents(
             where={"type": "dua", "category": category_slug},
             include=["metadatas"],
             limit=max_results * 2
@@ -265,7 +269,7 @@ def get_surah_verses(surah_no: int, page: int = 1, limit: int = 5) -> tuple[str,
     from bot.vectordb import get_collection
     try:
         collection = get_collection()
-        results = collection.get(where={"surah_no": surah_no}, include=["metadatas"])
+        results = collection.query_documents(where={"surah_no": surah_no}, include=["metadatas"])
         if not results or not results.get("metadatas"):
             return "No verses found for this Surah in the database.", [], False, False
         

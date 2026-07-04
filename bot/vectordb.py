@@ -1,19 +1,15 @@
 import os
+import json
 import re
 from typing import List, Dict, Tuple, Optional, Any
 from bot.config import logger
 
-try:
-    import chromadb
-    from chromadb.utils import embedding_functions
-    _chromadb_available = True
-except ImportError:
-    _chromadb_available = False
-    logger.warning("chromadb not installed — vector search disabled, BM25 fallback only")
+# Path for the lightweight document store JSON file
+DOCUMENTS_STORE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "documents_store.json"
+)
 
-CHROMA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "chroma_db")
-COLLECTION_NAME = "knowledge_base"
-MODEL_NAME = "all-MiniLM-L6-v2"
 _METADATA_SKIP_KEYS = frozenset({"content", "id"})
 _METADATA_MAX_STR_LEN = 4000
 
@@ -49,260 +45,202 @@ def _sanitize_metadata(post: Dict[str, Any], post_id: str) -> Dict[str, Any]:
             metadata[key] = str(value)[:_METADATA_MAX_STR_LEN]
     return metadata
 
-class VectorDBManager:
-    """Manages connection, collection initialization, and CRUD operations for ChromaDB vector store."""
-    
-    def __init__(self, chroma_dir: str = CHROMA_DIR, collection_name: str = COLLECTION_NAME, model_name: str = MODEL_NAME):
-        self.chroma_dir = chroma_dir
-        self.collection_name = collection_name
-        self.model_name = model_name
-        self._client: Optional[Any] = None
-        self._collection: Optional[Any] = None
-        self._embedding_fn: Optional[Any] = None
 
-    def is_available(self) -> bool:
-        return _chromadb_available
+class InMemoryDocStore:
+    """Lightweight in-memory document store persisted to a JSON file.
 
-    def get_embedding_function(self) -> Optional[Any]:
-        if not _chromadb_available:
-            return None
-        if self._embedding_fn is None:
-            try:
-                self._embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=self.model_name)
-            except Exception as e:
-                logger.warning(f"SentenceTransformer fallback to default: {e}")
-                self._embedding_fn = embedding_functions.DefaultEmbeddingFunction()
-        return self._embedding_fn
+    Replaces ChromaDB entirely — no ML models, no vector search.
+    For search, use BM25 (keyword-based) via bot/search.py.
+    """
 
-    def get_client(self) -> Optional[Any]:
-        if not _chromadb_available:
-            return None
-        if self._client is None:
-            self._client = chromadb.PersistentClient(path=self.chroma_dir)
-        return self._client
+    def __init__(self, persist_path: str = DOCUMENTS_STORE_PATH):
+        self.persist_path = persist_path
+        # Each entry: {"id": str, "text": str, "metadata": dict}
+        self._documents: List[Dict[str, Any]] = []
+        self._loaded = False
+        self._load_from_disk()
 
-    def get_collection(self) -> Optional[Any]:
-        if not _chromadb_available:
-            return None
-        if self._collection is None:
-            client = self.get_client()
-            if client:
-                self._collection = client.get_or_create_collection(
-                    name=self.collection_name,
-                    embedding_function=self.get_embedding_function()
-                )
-        return self._collection
+    # ── Persistence ──────────────────────────────────────────────
+
+    def _load_from_disk(self) -> None:
+        if self._loaded:
+            return
+        self._loaded = True
+        if not os.path.exists(self.persist_path):
+            logger.info("No existing document store found — starting fresh.")
+            return
+        try:
+            with open(self.persist_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self._documents = data if isinstance(data, list) else []
+            logger.info(f"Loaded {len(self._documents)} documents from store.")
+        except Exception as e:
+            logger.warning(f"Failed to load document store: {e}")
+            self._documents = []
+
+    def _save_to_disk(self) -> None:
+        try:
+            with open(self.persist_path, "w", encoding="utf-8") as f:
+                json.dump(self._documents, f, ensure_ascii=False, default=str)
+        except Exception as e:
+            logger.error(f"Failed to save document store: {e}")
+
+    # ── Public API (mirrors old ChromaDB-backed surface) ─────────
 
     def add_document(self, post: Dict[str, Any]) -> None:
-        coll = self.get_collection()
-        if not coll:
-            return
         text = _build_document_text(post)
         post_id = post.get("id", f"doc_{hash(text)}")
         metadata = _sanitize_metadata(post, post_id)
-        try:
-            coll.add(documents=[text], metadatas=[metadata], ids=[post_id])
-        except Exception as e:
-            logger.error(f"add_document failed: {e}")
+        self._documents.append({"id": post_id, "text": text, "metadata": metadata})
+        self._save_to_disk()
 
     def add_documents(self, posts: List[Dict[str, Any]]) -> None:
-        coll = self.get_collection()
-        if not coll or not posts:
+        if not posts:
             return
-        ids = [p.get("id", f"doc_{hash(_build_document_text(p))}") for p in posts]
-        documents = [_build_document_text(p) for p in posts]
-        metadatas = [_sanitize_metadata(p, ids[i]) for i, p in enumerate(posts)]
-        try:
-            coll.add(documents=documents, metadatas=metadatas, ids=ids)
-            logger.info(f"Added {len(posts)} documents to vector DB")
-        except Exception as e:
-            logger.error(f"add_documents batch failed: {e}")
+        for post in posts:
+            text = _build_document_text(post)
+            post_id = post.get("id", f"doc_{hash(text)}")
+            metadata = _sanitize_metadata(post, post_id)
+            self._documents.append({"id": post_id, "text": text, "metadata": metadata})
+        self._save_to_disk()
+        logger.info(f"Added {len(posts)} documents to store (total: {len(self._documents)})")
 
     def delete_by_id_prefix(self, prefix: str) -> int:
-        coll = self.get_collection()
-        if not coll:
-            return 0
-        try:
-            existing = coll.get(include=["metadatas"])
-            if not existing or not existing.get("ids"):
-                return 0
-            ids_to_delete = [
-                doc_id for doc_id in existing["ids"]
-                if doc_id.startswith(prefix)
-            ]
-            if not ids_to_delete:
-                return 0
-            for i in range(0, len(ids_to_delete), 100):
-                coll.delete(ids=ids_to_delete[i:i + 100])
-            return len(ids_to_delete)
-        except Exception as e:
-            logger.error(f"delete_by_id_prefix failed: {e}")
-            return 0
+        before = len(self._documents)
+        self._documents = [d for d in self._documents if not d["id"].startswith(prefix)]
+        removed = before - len(self._documents)
+        if removed > 0:
+            self._save_to_disk()
+        return removed
 
     def count_by_type(self, doc_type: str) -> int:
-        coll = self.get_collection()
-        if not coll:
-            return 0
-        try:
-            results = coll.get(where={"type": doc_type}, include=[])
-            return len(results.get("ids", [])) if results else 0
-        except Exception as e:
-            logger.error(f"count_by_type failed: {e}")
-            return 0
-
-    def search_vector(self, query: str, n_results: int = 5, where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        coll = self.get_collection()
-        if not coll:
-            return []
-        try:
-            kwargs = {
-                "query_texts": [query],
-                "n_results": n_results,
-                "include": ["documents", "metadatas", "distances"]
-            }
-            if where:
-                kwargs["where"] = where
-            results = coll.query(**kwargs)
-            hits = []
-            if results and results["ids"] and results["ids"][0]:
-                for i, doc_id in enumerate(results["ids"][0]):
-                    hits.append({
-                        "id": doc_id,
-                        "text": results["documents"][0][i],
-                        "metadata": results["metadatas"][0][i],
-                        "score": 1.0 - (results["distances"][0][i] if results.get("distances") else 0)
-                    })
-            return hits
-        except Exception as e:
-            logger.error(f"Vector search failed: {e}")
-            return []
-
-    def build_bm25_corpus(self) -> Tuple[List[str], List[Dict[str, Any]]]:
-        coll = self.get_collection()
-        if not coll:
-            return [], []
-        try:
-            all_docs = coll.get(include=["documents", "metadatas"])
-            if not all_docs or not all_docs["ids"]:
-                return [], []
-            return all_docs["documents"], all_docs["metadatas"]
-        except Exception as e:
-            logger.error(f"build_bm25_corpus failed: {e}")
-            return [], []
-
-    def document_exists(self, post_id: str) -> bool:
-        coll = self.get_collection()
-        if not coll:
-            return False
-        try:
-            existing = coll.get(ids=[post_id])
-            return bool(existing and len(existing["ids"]) > 0)
-        except Exception:
-            return False
+        return sum(1 for d in self._documents if d["metadata"].get("type") == doc_type)
 
     def get_document_count(self) -> int:
-        coll = self.get_collection()
-        if not coll:
-            return 0
-        try:
-            return coll.count()
-        except Exception:
-            return 0
+        return len(self._documents)
+
+    def document_exists(self, post_id: str) -> bool:
+        return any(d["id"] == post_id for d in self._documents)
 
     def delete_document(self, post_id: str) -> None:
-        coll = self.get_collection()
-        if not coll:
-            return
-        try:
-            coll.delete(ids=[post_id])
-        except Exception as e:
-            logger.error(f"delete_document failed: {e}")
+        self._documents = [d for d in self._documents if d["id"] != post_id]
+        self._save_to_disk()
 
     def reset_collection(self) -> None:
-        client = self.get_client()
-        if not client:
-            return
-        try:
-            client.delete_collection(self.collection_name)
-            self._collection = None
-        except Exception as e:
-            logger.error(f"reset_collection failed: {e}")
+        self._documents.clear()
+        self._save_to_disk()
 
-# Global instance for easy import backward-compatibility
-db_manager = VectorDBManager()
+    def build_bm25_corpus(self) -> Tuple[List[str], List[Dict[str, Any]]]:
+        texts = [d["text"] for d in self._documents]
+        metadatas = [d["metadata"] for d in self._documents]
+        return texts, metadatas
+
+    def search_vector(self, query: str, n_results: int = 5,
+                      where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """BM25-only mode — vector search returns empty results.
+        All search is handled by the hybrid search in bot/search.py which falls
+        back to BM25 when vector results are empty."""
+        return []
+
+    def query_documents(self, where: Optional[Dict[str, Any]] = None,
+                        include: Optional[List[str]] = None,
+                        limit: Optional[int] = None) -> Dict[str, Any]:
+        """Replaces ChromaDB's collection.get() — filters documents by metadata.
+        Returns dict with 'ids', 'documents', 'metadatas' keys (ChromaDB-compatible shape).
+        """
+        filtered = list(self._documents)
+
+        if where:
+            for key, value in where.items():
+                filtered = [d for d in filtered if d["metadata"].get(key) == value]
+
+        if limit and limit > 0:
+            filtered = filtered[:limit]
+
+        return {
+            "ids": [d["id"] for d in filtered],
+            "documents": [d["text"] for d in filtered] if include and "documents" in include else [],
+            "metadatas": [d["metadata"] for d in filtered] if include and "metadatas" in include
+                         else ([{}] * len(filtered) if include else []),
+        }
+
+
+# ── Global singleton ─────────────────────────────────────────────
+_doc_store = InMemoryDocStore()
+
+
+# ── Backward-compatible module-level API ─────────────────────────
 
 def _available() -> bool:
-    return db_manager.is_available()
+    """Always available — no external dependencies."""
+    return True
 
-def get_embedding_function() -> Optional[Any]:
-    return db_manager.get_embedding_function()
 
-def get_client() -> Optional[Any]:
-    return db_manager.get_client()
-
-def get_collection() -> Optional[Any]:
-    return db_manager.get_collection()
-
-def add_document(post: dict) -> None:
-    db_manager.add_document(post)
-
-def add_documents(posts: list) -> None:
-    db_manager.add_documents(posts)
-
-def search_vector(query: str, n_results: int = 5, where: dict = None) -> list:
-    return db_manager.search_vector(query, n_results, where)
-
-def build_bm25_corpus() -> tuple:
-    return db_manager.build_bm25_corpus()
-
-def document_exists(post_id: str) -> bool:
-    return db_manager.document_exists(post_id)
-
-def get_document_count() -> int:
-    return db_manager.get_document_count()
-
-def delete_document(post_id: str) -> None:
-    db_manager.delete_document(post_id)
-
-def reset_collection() -> None:
-    db_manager.reset_collection()
-
-def delete_by_id_prefix(prefix: str) -> int:
-    return db_manager.delete_by_id_prefix(prefix)
-
-def count_by_type(doc_type: str) -> int:
-    return db_manager.count_by_type(doc_type)
-
-class SemanticCacheManager(VectorDBManager):
-    def __init__(self):
-        super().__init__(collection_name="semantic_cache")
-
-cache_manager = SemanticCacheManager()
-
-def get_cached_response(query: str, threshold: float = 0.90) -> Optional[str]:
-    if not cache_manager.is_available():
-        return None
-    try:
-        hits = cache_manager.search_vector(query, n_results=1)
-        if hits and hits[0]["score"] >= threshold:
-            logger.info(f"Cache hit for query: {query[:50]}")
-            return hits[0]["metadata"].get("response")
-    except Exception as e:
-        logger.error(f"Error checking semantic cache: {e}")
+def get_embedding_function() -> None:
     return None
 
+
+def get_client() -> None:
+    return None
+
+
+def get_collection() -> Optional[InMemoryDocStore]:
+    """Returns the doc store for direct queries (used by search_duas_by_category, etc.)."""
+    return _doc_store
+
+
+def add_document(post: dict) -> None:
+    _doc_store.add_document(post)
+
+
+def add_documents(posts: list) -> None:
+    _doc_store.add_documents(posts)
+
+
+def search_vector(query: str, n_results: int = 5, where: dict = None) -> list:
+    return _doc_store.search_vector(query, n_results, where)
+
+
+def build_bm25_corpus() -> tuple:
+    return _doc_store.build_bm25_corpus()
+
+
+def document_exists(post_id: str) -> bool:
+    return _doc_store.document_exists(post_id)
+
+
+def get_document_count() -> int:
+    return _doc_store.get_document_count()
+
+
+def delete_document(post_id: str) -> None:
+    _doc_store.delete_document(post_id)
+
+
+def reset_collection() -> None:
+    _doc_store.reset_collection()
+
+
+def delete_by_id_prefix(prefix: str) -> int:
+    return _doc_store.delete_by_id_prefix(prefix)
+
+
+def count_by_type(doc_type: str) -> int:
+    return _doc_store.count_by_type(doc_type)
+
+
+def query_documents(where: Optional[Dict[str, Any]] = None,
+                    include: Optional[List[str]] = None,
+                    limit: Optional[int] = None) -> Dict[str, Any]:
+    """Exposes InMemoryDocStore.query_documents() for direct metadata queries."""
+    return _doc_store.query_documents(where=where, include=include, limit=limit)
+
+
+# ── Semantic Cache (disabled — no ML models) ────────────────────
+
+def get_cached_response(query: str, threshold: float = 0.90) -> Optional[str]:
+    return None
+
+
 def cache_response(query: str, response: str) -> None:
-    if not cache_manager.is_available():
-        return
-    try:
-        coll = cache_manager.get_collection()
-        if not coll:
-            return
-        doc_id = f"cache_{hash(query)}"
-        coll.add(
-            documents=[query],
-            metadatas=[{"response": response}],
-            ids=[doc_id]
-        )
-    except Exception as e:
-        logger.error(f"Error saving to semantic cache: {e}")
+    pass
