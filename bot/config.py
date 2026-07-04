@@ -30,6 +30,9 @@ DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "admin")
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN")
 META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "my_secret_verify_token")
 
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")  # Explicit webhook URL; falls back to RENDER_EXTERNAL_URL + /webhook
+
 RATE_LIMIT_DAILY = int(os.getenv("RATE_LIMIT_DAILY", "50"))
 RATE_LIMIT_VOICE_DAILY = int(os.getenv("RATE_LIMIT_VOICE_DAILY", "20"))
 INLINE_MAX_RESULTS = int(os.getenv("INLINE_MAX_RESULTS", "10"))

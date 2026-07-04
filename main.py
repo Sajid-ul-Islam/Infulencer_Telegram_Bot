@@ -1,25 +1,13 @@
 import datetime
 import asyncio
-from telegram import Update, BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeChat
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, InlineQueryHandler
-from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ, ADMIN_ID
-from bot.database import load_faqs
-from bot.server import ping_self
 import os
 import threading
 import uvicorn
-
-def start_fastapi_server():
-    port = int(os.environ.get("PORT", 8080))
-    logger.info(f"Starting FastAPI server on port {port}")
-    uvicorn.run("bot.fastapi_app:app", host="0.0.0.0", port=port, log_level="info")
-
-def start_background_services():
-    fastapi_thread = threading.Thread(target=start_fastapi_server, daemon=True)
-    fastapi_thread.start()
-    
-    ping_thread = threading.Thread(target=ping_self, daemon=True)
-    ping_thread.start()
+from telegram import Update, BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeChat
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, InlineQueryHandler
+from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ, ADMIN_ID, RENDER_EXTERNAL_URL, WEBHOOK_URL
+from bot.database import load_faqs
+from bot.server import ping_self
 from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, greeting_post, weekly_digest, daily_islamic_reminder, evening_islamic_reminder
 from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses
 from bot.handlers.commands import (
@@ -35,6 +23,7 @@ from bot.handlers.admin import (
 )
 from bot.handlers.messages import handle_message, welcome_new_members, button_callback_handler, handle_voice
 from bot.handlers.inline import inline_query
+
 
 async def background_init(app):
     try:
@@ -74,14 +63,16 @@ async def background_init(app):
     except Exception as e:
         logger.warning(f"RAG status check failed: {e}")
 
+
 async def post_init(application: Application):
     try:
         webhook_info = await application.bot.get_webhook_info()
         if webhook_info and webhook_info.url:
-            logger.info(f"Clearing webhook: {webhook_info.url}")
+            logger.info(f"Clearing old webhook: {webhook_info.url}")
             await application.bot.delete_webhook(drop_pending_updates=True)
     except Exception as e:
         logger.warning(f"Webhook cleanup: {e}")
+
     commands = [
         BotCommand("start", "Welcome message"),
         BotCommand("help", "Show all commands"),
@@ -122,16 +113,18 @@ async def post_init(application: Application):
             BotCommand("pickwinner", "Pick giveaway winner"),
         ]
         try:
-            await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=int(ADMIN_ID)))
+            await application.bot.set_my_commands(
+                admin_commands, scope=BotCommandScopeChat(chat_id=int(ADMIN_ID))
+            )
             logger.info("Admin bot commands menu updated for admin chat.")
         except Exception as e:
             logger.warning(f"Failed to set admin commands menu: {e}")
 
     asyncio.create_task(background_init(application))
 
-def main():
-    start_background_services()
 
+def build_application() -> Application:
+    """Build and configure the PTB Application with all handlers."""
     application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -177,17 +170,107 @@ def main():
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    # Schedule recurring jobs
     job_queue = application.job_queue
-    job_queue.run_daily(daily_islamic_reminder, time=datetime.time(10, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
-    job_queue.run_daily(evening_islamic_reminder, time=datetime.time(18, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
-    job_queue.run_daily(auto_post_youtube, time=datetime.time(9, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
-    job_queue.run_daily(auto_post_medium, time=datetime.time(18, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
-    job_queue.run_daily(auto_post_substack, time=datetime.time(14, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
-    job_queue.run_daily(greeting_post, time=datetime.time(8, 0, tzinfo=BOT_TZ), days=(0, 1, 2, 3, 4, 5, 6))
-    job_queue.run_daily(weekly_digest, time=datetime.time(12, 0, tzinfo=BOT_TZ), days=(6,))
+    job_queue.run_daily(
+        daily_islamic_reminder, time=datetime.time(10, 0, tzinfo=BOT_TZ),
+        days=(0, 1, 2, 3, 4, 5, 6)
+    )
+    job_queue.run_daily(
+        evening_islamic_reminder, time=datetime.time(18, 0, tzinfo=BOT_TZ),
+        days=(0, 1, 2, 3, 4, 5, 6)
+    )
+    job_queue.run_daily(
+        auto_post_youtube, time=datetime.time(9, 0, tzinfo=BOT_TZ),
+        days=(0, 1, 2, 3, 4, 5, 6)
+    )
+    job_queue.run_daily(
+        auto_post_medium, time=datetime.time(18, 0, tzinfo=BOT_TZ),
+        days=(0, 1, 2, 3, 4, 5, 6)
+    )
+    job_queue.run_daily(
+        auto_post_substack, time=datetime.time(14, 0, tzinfo=BOT_TZ),
+        days=(0, 1, 2, 3, 4, 5, 6)
+    )
+    job_queue.run_daily(
+        greeting_post, time=datetime.time(8, 0, tzinfo=BOT_TZ),
+        days=(0, 1, 2, 3, 4, 5, 6)
+    )
+    job_queue.run_daily(
+        weekly_digest, time=datetime.time(12, 0, tzinfo=BOT_TZ),
+        days=(6,)
+    )
 
-    logger.info("Bot started successfully!")
-    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    return application
+
+
+async def async_main():
+    # Build and configure the PTB application
+    application = build_application()
+
+    # Initialize the application (triggers post_init which clears old webhook, sets commands, starts background init)
+    await application.initialize()
+
+    # Expose the PTB application to the FastAPI webhook handler
+    import bot.fastapi_app
+    bot.fastapi_app.ptb_application = application
+
+    # Start the update processing pipeline (no polling — updates come via webhook)
+    await application.start()
+    logger.info("Bot application started — waiting for webhook updates.")
+
+    # Start the self-ping keepalive in a daemon thread
+    ping_thread = threading.Thread(target=ping_self, daemon=True)
+    ping_thread.start()
+
+    # Determine the webhook URL
+    webhook_url = WEBHOOK_URL
+    if not webhook_url:
+        external_url = RENDER_EXTERNAL_URL
+        if external_url:
+            webhook_url = f"{external_url.rstrip('/')}/webhook"
+
+    # Start the FastAPI / uvicorn server in the background
+    port = int(os.environ.get("PORT", 8080))
+    config = uvicorn.Config("bot.fastapi_app:app", host="0.0.0.0", port=port, log_level="info")
+    server = uvicorn.Server(config)
+    server_task = asyncio.create_task(server.serve())
+
+    # Brief pause to let the server bind the port before setting the webhook
+    await asyncio.sleep(1)
+
+    if webhook_url:
+        try:
+            await application.bot.set_webhook(
+                url=webhook_url,
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True
+            )
+            logger.info(f"Telegram webhook set to {webhook_url}")
+        except Exception as e:
+            logger.error(f"Failed to set Telegram webhook: {e}")
+            logger.warning("Bot will not receive updates until webhook is configured. "
+                           "You can set it manually via Telegram API or restart the service.")
+            # Don't exit — the server is running and can serve the dashboard
+    else:
+        logger.warning(
+            "Neither WEBHOOK_URL nor RENDER_EXTERNAL_URL is set. "
+            "The bot will not receive updates!"
+        )
+
+    # Wait for the server to finish (blocks until shutdown)
+    await server_task
+
+    # Cleanup on shutdown
+    logger.info("Shutting down bot application...")
+    await application.stop()
+    await application.shutdown()
+    logger.info("Bot application stopped.")
+
+
+def main():
+    asyncio.run(async_main())
+
 
 if __name__ == "__main__":
     main()

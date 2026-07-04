@@ -12,9 +12,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
+from telegram import Update
+from telegram.ext import Application as PTBApplication
+
 from bot.config import (
     logger, DASHBOARD_PASSWORD, TELEGRAM_TOKEN, CHANNEL_ID, GROUP_ID, META_VERIFY_TOKEN
 )
+
+# Global reference to the python-telegram-bot Application instance.
+# Set from main.py after building the application.
+ptb_application: PTBApplication | None = None
 from bot.database import (
     FAQ, save_faq, remove_faq, db, get_feedback_counts, 
     get_trending_searches, get_token_usage_stats, get_user_retention_stats
@@ -44,6 +51,30 @@ def check_auth(request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def get_dashboard():
     return DASHBOARD_HTML
+
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    """
+    Receive incoming Telegram updates via webhook.
+    Parses the JSON payload, creates an Update object, and queues it
+    for processing by the python-telegram-bot application.
+    Always returns 200 OK per Telegram's requirements.
+    """
+    global ptb_application
+    if ptb_application is None:
+        logger.warning("PTB application not ready — dropping incoming update")
+        return Response(status_code=200)
+
+    try:
+        data = await request.json()
+        update = Update.de_json(data, ptb_application.bot)
+        if update:
+            await ptb_application.update_queue.put(update)
+    except Exception as e:
+        logger.error(f"Error processing Telegram webhook update: {e}")
+
+    # Always respond 200 — Telegram will retry on non-200 responses
+    return Response(status_code=200)
 
 @app.get("/api/meta/webhook")
 async def verify_meta_webhook(request: Request):
