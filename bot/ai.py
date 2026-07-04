@@ -339,11 +339,14 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
         try:
             logger.info(f"Attempting inference with {model_name}")
             
+            # Copy the messages list so that if this provider fails, the mutation doesn't affect subsequent providers
+            provider_messages = list(messages)
+            
             # Allow up to 3 tool rounds
             for _ in range(3):
                 kwargs = {
                     "model": model_name,
-                    "messages": messages,
+                    "messages": provider_messages,
                     "temperature": 0.7
                 }
                 if api_key and provider_name != "Ollama":
@@ -369,7 +372,7 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                     final_res = message.content
                     break
                     
-                messages.append(message.model_dump(exclude_none=True))
+                provider_messages.append(message.model_dump(exclude_none=True))
                 
                 for tool_call in tool_calls:
                     func_name = tool_call.function.name
@@ -380,7 +383,7 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                     
                     tool_result = await execute_tool(func_name, args)
                     
-                    messages.append({
+                    provider_messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "name": func_name,
@@ -388,13 +391,13 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                     })
                     
             if final_res is None: # means it looped 3 times and still returned tool calls
-                messages.append({
+                provider_messages.append({
                     "role": "system",
                     "content": "Self-Reflection: You have retrieved data using tools. Before answering, evaluate if this data fully and accurately answers the user's question. If it does, generate a comprehensive answer based ONLY on the retrieved data. If it doesn't, state clearly what information is missing or answer based on what is available without hallucinating."
                 })
                 kwargs_final = {
                     "model": model_name,
-                    "messages": messages,
+                    "messages": provider_messages,
                     "temperature": 0.7
                 }
                 if api_key and provider_name != "Ollama":
@@ -407,7 +410,7 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
             FAILED_PROVIDERS.pop(model_name, None) # Success, reset failure
             
             if final_res:
-                tool_outputs = " ".join([m.get("content", "") for m in messages if m.get("role") == "tool"])
+                tool_outputs = " ".join([m.get("content", "") for m in provider_messages if m.get("role") == "tool"])
                 final_res = validate_arabic_text(final_res, tool_outputs)
                 
                 if use_memory and user_id:

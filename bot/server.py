@@ -68,7 +68,6 @@ def ping_self():
         
     while True:
         try:
-            time.sleep(600)  # Sleep 10 minutes
             start_ping = time.time()
             response = requests.get(url, timeout=10)
             latency = int((time.time() - start_ping) * 1000)
@@ -82,6 +81,7 @@ def ping_self():
             logger.info(f"Self-ping executed: Status {response.status_code} ({latency}ms)")
         except Exception as e:
             logger.error(f"Self-ping failed: {e}")
+        time.sleep(600)  # Sleep 10 minutes between pings
 
 def check_and_sync_rss_manually():
     """Manually fetches latest YouTube, Medium, and Substack entries and broadcasts to channel if new."""
