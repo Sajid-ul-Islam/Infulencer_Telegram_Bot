@@ -12,7 +12,6 @@ if FIREBASE_CREDENTIALS:
         cred = credentials.Certificate(cred_dict)
         firebase_admin.initialize_app(cred)
         db = firestore.client()
-        list(db.collections(page_size=1))
     except Exception as e:
         logger.error(f"Error initializing Firebase — Firestore disabled: {e}")
         db = None

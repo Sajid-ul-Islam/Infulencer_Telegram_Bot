@@ -2,6 +2,10 @@ import os
 import logging
 import datetime
 from zoneinfo import ZoneInfo
+from dotenv import load_dotenv
+
+# Load local environment variables from .env if present
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
