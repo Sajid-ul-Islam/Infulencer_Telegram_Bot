@@ -246,7 +246,7 @@ async def async_main():
                 if resp.status_code == 200:
                     logger.info(f"FastAPI server ready after ~{attempt * 0.25}s")
                     break
-            except (httpx.RequestError, httpx.TimeoutException):
+            except httpx.RequestError:
                 pass
             await asyncio.sleep(0.25)
         else:

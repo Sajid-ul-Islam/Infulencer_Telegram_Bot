@@ -23,6 +23,10 @@ services:
         sync: false
       - key: DASHBOARD_PASSWORD
         sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        sync: false
 
     # To use a Persistent Disk for ChromaDB, you must be on a paid Render plan (e.g., plan: starter).
     # Uncomment the following to mount a persistent disk:
