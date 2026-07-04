@@ -83,30 +83,38 @@ def hybrid_search(query: str, n_results: int = 5, alpha: float = 0.5, where: Opt
 _cross_encoder = None
 
 def _get_cross_encoder():
-    """Lazy-loaded singleton for the cross-encoder model to avoid reloading on every search."""
+    """Lazy-loaded singleton for the cross-encoder model to avoid reloading on every search.
+    Gracefully returns None if the model fails to load (e.g. out-of-memory on Render free tier)."""
     global _cross_encoder
     if _cross_encoder is None:
-        from sentence_transformers import CrossEncoder
-        _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+        try:
+            from sentence_transformers import CrossEncoder
+            _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+        except Exception as e:
+            logger.warning(f"Failed to load cross-encoder model (reranking disabled): {e}")
+            _cross_encoder = None
     return _cross_encoder
 
 
 def rerank(query: str, hits: List[Dict[str, Any]], top_n: int = 3) -> List[Dict[str, Any]]:
-    """Reranks search results using a cross-encoder model for improved accuracy."""
+    """Reranks search results using a cross-encoder model for improved accuracy.
+    If the model is unavailable (OOM, not installed, etc.), returns hits unmodified."""
     if not hits:
         return []
+    model = _get_cross_encoder()
+    if model is None:
+        return hits[:top_n]
     try:
-        model = _get_cross_encoder()
         pairs = [[query, hit["text"][:512]] for hit in hits]
         scores = model.predict(pairs)
         for i, hit in enumerate(hits):
             hit["score"] = float(scores[i])
         hits.sort(key=lambda x: x["score"], reverse=True)
     except Exception as e:
-        logger.warning(f"Cross-encoder reranking unavailable: {e}")
+        logger.warning(f"Cross-encoder reranking failed: {e}")
     return hits[:top_n]
 
-def search_pipeline(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
+def search_pipeline(query: str, n_results: int = 5, use_rerank: bool = False) -> str:
     """Executes the hybrid search and reranking query pipeline for past content."""
     hits = hybrid_search(query, n_results=n_results)
     if not hits:
@@ -124,7 +132,7 @@ def search_pipeline(query: str, n_results: int = 5, use_rerank: bool = True) -> 
         )
     return "\n\n---\n\n".join(formatted)
 
-def search_duas(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
+def search_duas(query: str, n_results: int = 5, use_rerank: bool = False) -> str:
     """Executes the hybrid search pipeline scoped for Hisnul Muslim duas.
     Uses combined vector + BM25 scoring for better keyword matches (Arabic names, categories)."""
     hits = hybrid_search(query, n_results=n_results, alpha=0.5, where={"type": "dua"})
@@ -148,7 +156,7 @@ def search_duas(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
         )
     return "\n\n---\n\n".join(formatted)
 
-def search_quran(query: str, n_results: int = 5, use_rerank: bool = True) -> str:
+def search_quran(query: str, n_results: int = 5, use_rerank: bool = False) -> str:
     """Executes the hybrid search pipeline scoped for Quran verses.
     Uses combined vector + BM25 scoring for better keyword matches (surah names, verse numbers)."""
     hits = hybrid_search(query, n_results=n_results, alpha=0.5, where={"type": "quran"})
