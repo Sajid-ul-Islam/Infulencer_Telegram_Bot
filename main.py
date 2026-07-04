@@ -230,6 +230,13 @@ async def async_main():
         if external_url:
             webhook_url = f"{external_url.rstrip('/')}/webhook"
 
+    # Ensure the webhook URL points to the /webhook endpoint
+    if webhook_url:
+        # Remove trailing slash, then append /webhook if it doesn't already end with it
+        webhook_url = webhook_url.rstrip('/')
+        if not webhook_url.endswith('/webhook'):
+            webhook_url = f"{webhook_url}/webhook"
+
     # Start the FastAPI / uvicorn server in the background
     port = int(os.environ.get("PORT", 8080))
     config = uvicorn.Config("bot.fastapi_app:app", host="0.0.0.0", port=port, log_level="info")
