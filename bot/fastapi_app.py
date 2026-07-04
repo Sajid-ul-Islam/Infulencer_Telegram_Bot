@@ -48,6 +48,12 @@ def check_auth(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return True
 
+@app.get("/healthz")
+async def healthz():
+    """Lightweight health check endpoint used by the startup readiness poller."""
+    return {"status": "ok"}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def get_dashboard():
     return DASHBOARD_HTML
