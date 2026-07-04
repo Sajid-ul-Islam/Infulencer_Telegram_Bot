@@ -1363,7 +1363,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const options = {
                 method,
                 headers: {
-                    'Authorization': token,
+                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 }
             };
