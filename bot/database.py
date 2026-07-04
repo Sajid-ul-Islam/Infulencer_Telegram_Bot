@@ -9,9 +9,20 @@ db = None
 if FIREBASE_CREDENTIALS:
     try:
         cred_dict = json.loads(FIREBASE_CREDENTIALS)
+        
+        # Verify credentials instantly via direct HTTP token refresh before initializing Firebase
+        from google.oauth2 import service_account
+        import google.auth.transport.requests
+        scopes = ['https://www.googleapis.com/auth/cloud-platform']
+        google_creds = service_account.Credentials.from_service_account_info(cred_dict, scopes=scopes)
+        req = google.auth.transport.requests.Request()
+        google_creds.refresh(req)
+        
+        # If token refresh succeeded, credentials are valid! Now initialize Firebase admin client
         cred = credentials.Certificate(cred_dict)
         firebase_admin.initialize_app(cred)
         db = firestore.client()
+        logger.info("Firebase Firestore connection verified and initialized successfully.")
     except Exception as e:
         logger.error(f"Error initializing Firebase — Firestore disabled: {e}")
         db = None
