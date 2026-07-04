@@ -236,8 +236,24 @@ async def async_main():
     server = uvicorn.Server(config)
     server_task = asyncio.create_task(server.serve())
 
-    # Brief pause to let the server bind the port before setting the webhook
-    await asyncio.sleep(1)
+    # Wait for the server to be ready by polling /healthz
+    import httpx
+    health_url = f"http://127.0.0.1:{port}/healthz"
+    async with httpx.AsyncClient() as client:
+        for attempt in range(30):
+            try:
+                resp = await client.get(health_url, timeout=2)
+                if resp.status_code == 200:
+                    logger.info(f"FastAPI server ready after ~{attempt * 0.25}s")
+                    break
+            except (httpx.RequestError, httpx.TimeoutException):
+                pass
+            await asyncio.sleep(0.25)
+        else:
+            logger.warning(
+                "FastAPI server did not report ready within 7.5s. "
+                "Proceeding to set webhook anyway."
+            )
 
     if webhook_url:
         try:
