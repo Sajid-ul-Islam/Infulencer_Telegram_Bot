@@ -873,6 +873,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
                 Broadcaster
             </li>
+            <li class="nav-item" data-tab="content-hub">
+                <svg viewBox="0 0 24 24" style="width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;"><path d="M4 11a9 9 0 0 1 9 9"></path><path d="M4 4a16 16 0 0 1 16 16"></path><circle cx="5" cy="19" r="1"></circle></svg>
+                RSS Content Hub
+            </li>
             <li class="nav-item" data-tab="logs">
                 <svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
                 Live Logs
@@ -1265,6 +1269,38 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </section>
 
+        <!-- RSS CONTENT HUB TAB -->
+        <section id="tab-content-hub" class="tab-content">
+            <div class="card glass">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 16px; margin-bottom: 16px;">
+                    <div class="card-title" style="margin-bottom: 0;">📢 RSS Feed Content Syndication</div>
+                    <button onclick="refreshContentHub()" class="btn btn-secondary" style="font-size: 13px; padding: 6px 12px;">
+                        🔄 Load Recent Feed Posts
+                    </button>
+                </div>
+                <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 24px; line-height: 1.5;">
+                    Below are the latest posts scraped from your configured RSS feeds (YouTube, Substack, Medium, and Facebook). Review recent content and manually post specific updates directly to your Telegram channel.
+                </p>
+                <div class="table-container" style="max-height: 600px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Platform</th>
+                                <th>Post Title</th>
+                                <th>Published Date</th>
+                                <th class="action-cell">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="content-hub-body">
+                            <tr>
+                                <td colspan="4" class="no-data">Click "Load Recent Feed Posts" to retrieve content</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
         <!-- LOGS TAB -->
         <section id="tab-logs" class="tab-content">
             <div class="console-header">
@@ -1310,6 +1346,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (tabId === 'questions') refreshQuestions();
             if (tabId === 'analytics') refreshAnalytics();
             if (tabId === 'logs') refreshLogs();
+            if (tabId === 'content-hub') refreshContentHub();
         }
 
         // Authentication logic
@@ -1950,6 +1987,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (activeTab === 'questions') refreshQuestions();
             if (activeTab === 'analytics') refreshAnalytics();
             if (activeTab === 'logs') refreshLogs();
+            if (activeTab === 'content-hub') refreshContentHub();
         }
 
         // Background poller
@@ -1968,6 +2006,86 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (pollerId) {
                 clearInterval(pollerId);
                 pollerId = null;
+            }
+        }
+
+        async function refreshContentHub() {
+            const body = document.getElementById('content-hub-body');
+            body.innerHTML = '<tr><td colspan="4" class="no-data">Fetching latest RSS posts...</td></tr>';
+            
+            try {
+                const res = await fetchAPI('/api/content/recent');
+                body.innerHTML = '';
+                
+                if (!res || !res.posts || res.posts.length === 0) {
+                    body.innerHTML = '<tr><td colspan="4" class="no-data">No posts found in feeds. Ensure URLs are configured.</td></tr>';
+                    return;
+                }
+                
+                res.posts.forEach(post => {
+                    const tr = document.createElement('tr');
+                    
+                    // Platform badge colors
+                    let badgeColor = 'var(--text-secondary)';
+                    let badgeBg = 'rgba(255, 255, 255, 0.05)';
+                    if (post.platform === 'youtube') {
+                        badgeColor = '#EF4444';
+                        badgeBg = 'rgba(239, 68, 68, 0.1)';
+                    } else if (post.platform === 'medium') {
+                        badgeColor = 'var(--text-primary)';
+                        badgeBg = 'rgba(255, 255, 255, 0.1)';
+                    } else if (post.platform === 'substack') {
+                        badgeColor = '#F97316';
+                        badgeBg = 'rgba(249, 115, 22, 0.1)';
+                    } else if (post.platform === 'facebook') {
+                        badgeColor = '#3B82F6';
+                        badgeBg = 'rgba(59, 130, 246, 0.1)';
+                    }
+                    
+                    const badge = `<span style="padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: ${badgeColor}; background: ${badgeBg}; border: 1px solid ${badgeColor}20;">${escapeHTML(post.platform)}</span>`;
+                    
+                    tr.innerHTML = `
+                        <td>${badge}</td>
+                        <td>
+                            <div style="font-weight: 600; color: var(--text-primary); font-size: 14px; max-width: 450px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${escapeHTML(post.title)}
+                            </div>
+                            <a href="${escapeHTML(post.link)}" target="_blank" style="color: var(--primary); font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px;">
+                                View source link 🔗
+                            </a>
+                        </td>
+                        <td style="color: var(--text-secondary); font-size: 13px;">${escapeHTML(post.date || 'N/A')}</td>
+                        <td class="action-cell">
+                            <button class="btn btn-primary" onclick="postToChannel('${escapeJS(post.platform)}', '${escapeJS(post.title)}', '${escapeJS(post.link)}')" style="padding: 6px 12px; font-size: 12px; font-weight: 600;">
+                                📢 Post to Channel
+                            </button>
+                        </td>
+                    `;
+                    body.appendChild(tr);
+                });
+            } catch (err) {
+                console.error(err);
+                body.innerHTML = '<tr><td colspan="4" class="no-data" style="color: var(--error);">Failed to fetch recent posts</td></tr>';
+            }
+        }
+        
+        async function postToChannel(platform, title, link) {
+            if (!confirm(`Are you sure you want to manually post this ${platform} entry to your Telegram channel?\\n\\n"${title}"`)) {
+                return;
+            }
+            
+            try {
+                const res = await fetchAPI('/api/content/post', 'POST', { platform, title, link });
+                if (res && res.status === 'success') {
+                    showToast('Successfully broadcasted to Telegram channel!', 'success');
+                } else if (res && res.error) {
+                    showToast(res.error, 'error');
+                } else {
+                    showToast('Failed to post entry to channel.', 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Failed to send broadcast.', 'error');
             }
         }
 

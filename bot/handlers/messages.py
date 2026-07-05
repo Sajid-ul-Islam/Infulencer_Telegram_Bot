@@ -50,18 +50,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Determine if AI should respond
     should_use_ai = False
+    cleaned_query = user_message.strip()
+    
+    # Check trigger prefixes in group chats
+    is_group = update.message.chat.type in ["group", "supergroup"]
+    starts_with_prefix = False
+    
+    if is_group:
+        msg_lower = user_message.strip().lower()
+        if msg_lower.startswith("?"):
+            starts_with_prefix = True
+            cleaned_query = user_message.strip()[1:].strip()
+        elif msg_lower.startswith("bot "):
+            starts_with_prefix = True
+            cleaned_query = user_message.strip()[4:].strip()
+        elif msg_lower.startswith("ai "):
+            starts_with_prefix = True
+            cleaned_query = user_message.strip()[3:].strip()
+        elif msg_lower.startswith("question "):
+            starts_with_prefix = True
+            cleaned_query = user_message.strip()[9:].strip()
+
     if update.message.chat.type == "private":
         should_use_ai = True
     elif update.message.reply_to_message and update.message.reply_to_message.from_user.id == context.bot.id:
         should_use_ai = True
     elif context.bot.username and f"@{context.bot.username}" in user_message:
         should_use_ai = True
+        cleaned_query = user_message.replace(f"@{context.bot.username}", "").strip()
+    elif is_group and starts_with_prefix:
+        should_use_ai = True
 
     if should_use_ai:
         await update.message.chat.send_action(ChatAction.TYPING)
-        response = await get_ai_response(user_message, user_id=user_id, use_memory=True)
+        response = await get_ai_response(cleaned_query, user_id=user_id, use_memory=True)
         if not response:
-            response = get_faq_response(user_message)
+            response = get_faq_response(cleaned_query)
             if not response:
                 response = "Walaikum Assalam! 😊 How can I help you today? Type /help to see what I can do."
         else:

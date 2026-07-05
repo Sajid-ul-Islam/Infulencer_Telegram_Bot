@@ -409,3 +409,126 @@ async def pick_giveaway():
         raise HTTPException(status_code=500, detail=res.text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/content/recent", dependencies=[Depends(check_auth)])
+async def get_recent_content_feeds():
+    import feedparser
+    import html
+    import httpx
+    import re
+    from bot.config import (
+        YOUTUBE_CHANNEL_ID, MEDIUM_USERNAME, SUBSTACK_URL, FACEBOOK_RSS_URL
+    )
+    
+    platforms = [
+        ("youtube", f"https://www.youtube.com/feeds/videos.xml?channel_id={YOUTUBE_CHANNEL_ID}"),
+        ("medium", f"https://medium.com/feed/@{MEDIUM_USERNAME}"),
+        ("substack", f"{SUBSTACK_URL.rstrip('/')}/feed"),
+    ]
+    if FACEBOOK_RSS_URL:
+        platforms.append(("facebook", FACEBOOK_RSS_URL))
+        
+    recent_posts = []
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for platform, url in platforms:
+            try:
+                response = await client.get(url)
+                if response.status_code == 200:
+                    feed = feedparser.parse(response.content)
+                    for entry in feed.entries[:5]:  # get top 5
+                        title = entry.title
+                        if platform == "facebook" and (not title or len(title) < 5):
+                            title = entry.summary or entry.description or "New Post"
+                        
+                        clean_title = re.sub(r'<[^>]+>', '', title)
+                        clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+                        
+                        date_str = ""
+                        if hasattr(entry, "published"):
+                            date_str = entry.published
+                        elif hasattr(entry, "updated"):
+                            date_str = entry.updated
+                            
+                        recent_posts.append({
+                            "platform": platform,
+                            "title": clean_title,
+                            "link": entry.link,
+                            "date": date_str
+                        })
+            except Exception as e:
+                logger.error(f"Error fetching recent feeds for {platform}: {e}")
+                
+    return {"posts": recent_posts}
+
+@app.post("/api/content/post", dependencies=[Depends(check_auth)])
+async def post_content_to_channel(request: Request):
+    data = await request.json()
+    platform = data.get("platform")
+    title = data.get("title")
+    link = data.get("link")
+    
+    if not platform or not title or not link:
+        raise HTTPException(status_code=400, detail="Platform, title, and link are required")
+        
+    import html
+    from bot.config import YOUTUBE_LINK, MEDIUM_LINK, SUBSTACK_URL, FACEBOOK_LINK
+    
+    if platform == "youtube":
+        btn_text = "Watch Video 🎥"
+        emoji = "🎥"
+        type_name = "Video"
+    elif platform == "medium":
+        btn_text = "Read Article 📝"
+        emoji = "📝"
+        type_name = "Article"
+    elif platform == "substack":
+        btn_text = "Read Issue 📰"
+        emoji = "📰"
+        type_name = "Newsletter"
+    elif platform == "facebook":
+        btn_text = "View Post 👍"
+        emoji = "👍"
+        type_name = "Facebook Post"
+    else:
+        btn_text = "View Link 🔗"
+        emoji = "🔗"
+        type_name = "Content"
+        
+    safe_title = html.escape(title)
+    message = (
+        f"{emoji} <b>Featured {type_name}: {safe_title}</b>\n\n"
+        f"Check out this content from the hub! 👇"
+    )
+    
+    reply_markup = {"inline_keyboard": [[{"text": btn_text, "url": link}]]}
+    
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        res = requests.post(url, json={
+            "chat_id": CHANNEL_ID,
+            "text": message,
+            "parse_mode": "HTML",
+            "reply_markup": reply_markup
+        }, timeout=10)
+        
+        if res.status_code == 200:
+            if platform == "youtube":
+                try:
+                    import asyncio
+                    from bot.jobs import _transcribe_and_ingest
+                    asyncio.create_task(_transcribe_and_ingest(link, None))
+                except Exception as ex:
+                    logger.error(f"Error starting transcription: {ex}")
+            else:
+                try:
+                    import asyncio
+                    from bot.pipeline import ingest_rss_content
+                    asyncio.create_task(ingest_rss_content())
+                except Exception as ex:
+                    logger.error(f"Error starting ingestion: {ex}")
+            return {"status": "success"}
+            
+        raise HTTPException(status_code=500, detail=res.text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
