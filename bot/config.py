@@ -16,7 +16,7 @@ logger = logging.getLogger("bot")
 
 # ============ CONFIGURATION ============
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
+CHANNEL_ID = os.getenv("CHANNEL_ID") or "@bearded_bengali"
 GROUP_ID = os.getenv("GROUP_ID")
 ADMIN_ID = os.getenv("ADMIN_ID")
 FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS")

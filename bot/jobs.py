@@ -3,7 +3,7 @@ from typing import Optional
 from urllib.parse import quote
 from telegram import InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from bot.config import logger, CHANNEL_ID
+from bot.config import logger, CHANNEL_ID, BOT_TZ
 from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
 from bot.pipeline import ingest_rss_content
 from bot.transcriber import transcribe_youtube
@@ -297,3 +297,111 @@ async def evening_islamic_reminder(context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Sent evening reminders to {sent_count}/{len(users)} users.")
     except Exception as e:
         logger.error(f"Error in evening_islamic_reminder: {e}")
+
+
+recently_posted_urls = []
+
+async def scheduled_content_hub_post(context: ContextTypes.DEFAULT_TYPE):
+    """Periodically posts latest or random content from YouTube, Medium, or Substack during peak hours."""
+    global recently_posted_urls
+    
+    # Check if current hour is a peak hour in BOT_TZ
+    import datetime
+    current_time = datetime.datetime.now(BOT_TZ)
+    current_hour = current_time.hour
+    
+    # Peak hours: 9 AM, 12 PM, 3 PM, 6 PM, 9 PM, 11 PM (every 2-3 hours)
+    PEAK_HOURS = [9, 12, 15, 18, 21, 23]
+    if current_hour not in PEAK_HOURS:
+        return
+        
+    import random
+    import feedparser
+    import html
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from bot.config import YOUTUBE_CHANNEL_ID, MEDIUM_USERNAME, SUBSTACK_URL, YOUTUBE_LINK, MEDIUM_LINK
+    
+    # Select random platform
+    platforms = ["youtube", "medium", "substack"]
+    random.shuffle(platforms)
+    
+    # We will try platforms until one succeeded
+    for platform in platforms:
+        try:
+            if platform == "youtube":
+                rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={YOUTUBE_CHANNEL_ID}"
+                profile_link = YOUTUBE_LINK
+                btn_text = "Watch Video 🎥"
+                emoji = "🎥"
+                type_name = "Video"
+            elif platform == "medium":
+                rss_url = f"https://medium.com/feed/@{MEDIUM_USERNAME}"
+                profile_link = MEDIUM_LINK
+                btn_text = "Read Article 📝"
+                emoji = "📝"
+                type_name = "Article"
+            else:  # substack
+                rss_url = f"{SUBSTACK_URL.rstrip('/')}/feed"
+                profile_link = SUBSTACK_URL
+                btn_text = "Read Issue 📰"
+                emoji = "📰"
+                type_name = "Newsletter"
+                
+            # Parse feed
+            import httpx
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(rss_url)
+                feed = feedparser.parse(response.content)
+                
+            if not feed.entries:
+                continue
+                
+            # Choose mode: latest (70% weight) or random from feed (30% weight)
+            mode = random.choices(["latest", "random"], weights=[0.7, 0.3], k=1)[0]
+            
+            selected_entry = None
+            if mode == "latest":
+                selected_entry = feed.entries[0]
+            else:
+                # Try to find a random entry not recently posted
+                available_entries = [e for e in feed.entries if e.link not in recently_posted_urls]
+                if available_entries:
+                    selected_entry = random.choice(available_entries)
+                else:
+                    selected_entry = feed.entries[0]
+                    
+            if not selected_entry:
+                continue
+                
+            title = html.escape(selected_entry.title)
+            link = selected_entry.link
+            
+            # Format message
+            message = (
+                f"{emoji} <b>Featured {type_name}: {title}</b>\n\n"
+                f"Check out this content from the hub! 👇"
+            )
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(btn_text, url=link)]
+            ])
+            
+            await send_channel_message(context, message, reply_markup=keyboard)
+            
+            # Add to recently posted tracking
+            recently_posted_urls.append(link)
+            if len(recently_posted_urls) > 15:
+                recently_posted_urls.pop(0)
+                
+            # If it was youtube, trigger transcription/ingest
+            if platform == "youtube":
+                asyncio.create_task(_transcribe_and_ingest(link, context))
+            else:
+                await ingest_rss_content()
+                
+            logger.info(f"Successfully posted {mode} {platform} entry to channel: {title}")
+            break  # Succeeded posting, stop trying other platforms
+            
+        except Exception as e:
+            logger.error(f"Error in scheduled_content_hub_post for {platform}: {e}")
+            continue

@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ, ADMIN_ID, RENDER_EXTERNAL_URL, WEBHOOK_URL, validate_ai_keys
 from bot.database import load_faqs
 from bot.server import ping_self
-from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, greeting_post, weekly_digest, daily_islamic_reminder, evening_islamic_reminder
+from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, greeting_post, weekly_digest, daily_islamic_reminder, evening_islamic_reminder, scheduled_content_hub_post
 from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses
 from bot.handlers.commands import (
     start, socials_command, latest, youtube, medium, substack,
@@ -218,6 +218,13 @@ def build_application() -> Application:
     job_queue.run_daily(
         weekly_digest, time=datetime.time(12, 0, tzinfo=BOT_TZ),
         days=(6,)
+    )
+
+    # Hourly repeating job for the content hub poster (checks peak hours internally)
+    job_queue.run_repeating(
+        scheduled_content_hub_post,
+        interval=3600,
+        first=10
     )
 
     return application
