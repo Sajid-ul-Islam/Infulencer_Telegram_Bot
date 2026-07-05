@@ -302,19 +302,9 @@ async def evening_islamic_reminder(context: ContextTypes.DEFAULT_TYPE):
 recently_posted_urls = []
 
 async def scheduled_content_hub_post(context: ContextTypes.DEFAULT_TYPE):
-    """Periodically posts latest or random content from YouTube, Medium, or Substack during peak hours."""
+    """Periodically posts latest or random content from YouTube, Medium, or Substack every 2 hours."""
     global recently_posted_urls
     
-    # Check if current hour is a peak hour in BOT_TZ
-    import datetime
-    current_time = datetime.datetime.now(BOT_TZ)
-    current_hour = current_time.hour
-    
-    # Peak hours: 9 AM, 12 PM, 3 PM, 6 PM, 9 PM, 11 PM (every 2-3 hours)
-    PEAK_HOURS = [9, 12, 15, 18, 21, 23]
-    if current_hour not in PEAK_HOURS:
-        return
-        
     import random
     import feedparser
     import html

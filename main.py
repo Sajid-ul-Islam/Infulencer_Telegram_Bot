@@ -220,10 +220,10 @@ def build_application() -> Application:
         days=(6,)
     )
 
-    # Hourly repeating job for the content hub poster (checks peak hours internally)
+    # Repeating job for the content hub poster (runs every 2 hours)
     job_queue.run_repeating(
         scheduled_content_hub_post,
-        interval=3600,
+        interval=7200,
         first=10
     )
 
