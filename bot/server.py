@@ -86,7 +86,7 @@ def ping_self():
 def check_and_sync_rss_manually():
     """Manually fetches latest YouTube, Medium, and Substack entries and broadcasts to channel if new."""
     import bot.jobs
-    from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts, get_facebook_posts
+    from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts, get_facebook_posts, get_twitter_posts
 
     def send_tg_message(text, reply_markup=None):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -145,6 +145,18 @@ def check_and_sync_rss_manually():
                 logger.info(f"Manual Sync: Posted Facebook post: {link}")
     except Exception as e:
         logger.error(f"Error manually syncing Facebook: {e}")
+
+    # Sync Twitter
+    try:
+        tw_msg, tw_btn, link = run_async(get_twitter_posts(limit=1))
+        if tw_msg and link and link != bot.jobs.last_posted_twitter_url:
+            reply_markup = {"inline_keyboard": [[{"text": tw_btn.text, "url": tw_btn.url}]]} if tw_btn else None
+            if send_tg_message(tw_msg, reply_markup):
+                bot.jobs.last_posted_twitter_url = link
+                posts_sent += 1
+                logger.info(f"Manual Sync: Posted Twitter tweet: {link}")
+    except Exception as e:
+        logger.error(f"Error manually syncing Twitter: {e}")
 
     return posts_sent
 
@@ -2040,6 +2052,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     } else if (post.platform === 'facebook') {
                         badgeColor = '#3B82F6';
                         badgeBg = 'rgba(59, 130, 246, 0.1)';
+                    } else if (post.platform === 'twitter') {
+                        badgeColor = '#1DA1F2';
+                        badgeBg = 'rgba(29, 161, 242, 0.1)';
                     }
                     
                     const badge = `<span style="padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: ${badgeColor}; background: ${badgeBg}; border: 1px solid ${badgeColor}20;">${escapeHTML(post.platform)}</span>`;

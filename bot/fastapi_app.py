@@ -417,7 +417,7 @@ async def get_recent_content_feeds():
     import httpx
     import re
     from bot.config import (
-        YOUTUBE_CHANNEL_ID, MEDIUM_USERNAME, SUBSTACK_URL, FACEBOOK_RSS_URL
+        YOUTUBE_CHANNEL_ID, MEDIUM_USERNAME, SUBSTACK_URL, FACEBOOK_RSS_URL, TWITTER_RSS_URL
     )
     
     platforms = [
@@ -427,6 +427,8 @@ async def get_recent_content_feeds():
     ]
     if FACEBOOK_RSS_URL:
         platforms.append(("facebook", FACEBOOK_RSS_URL))
+    if TWITTER_RSS_URL:
+        platforms.append(("twitter", TWITTER_RSS_URL))
         
     recent_posts = []
     
@@ -438,7 +440,7 @@ async def get_recent_content_feeds():
                     feed = feedparser.parse(response.content)
                     for entry in feed.entries[:5]:  # get top 5
                         title = entry.title
-                        if platform == "facebook" and (not title or len(title) < 5):
+                        if platform in ["facebook", "twitter"] and (not title or len(title) < 5):
                             title = entry.summary or entry.description or "New Post"
                         
                         clean_title = re.sub(r'<[^>]+>', '', title)
@@ -472,7 +474,7 @@ async def post_content_to_channel(request: Request):
         raise HTTPException(status_code=400, detail="Platform, title, and link are required")
         
     import html
-    from bot.config import YOUTUBE_LINK, MEDIUM_LINK, SUBSTACK_URL, FACEBOOK_LINK
+    from bot.config import YOUTUBE_LINK, MEDIUM_LINK, SUBSTACK_URL, FACEBOOK_LINK, TWITTER_LINK
     
     if platform == "youtube":
         btn_text = "Watch Video 🎥"
@@ -490,6 +492,10 @@ async def post_content_to_channel(request: Request):
         btn_text = "View Post 👍"
         emoji = "👍"
         type_name = "Facebook Post"
+    elif platform == "twitter":
+        btn_text = "View Tweet 🐦"
+        emoji = "🐦"
+        type_name = "Tweet"
     else:
         btn_text = "View Link 🔗"
         emoji = "🔗"

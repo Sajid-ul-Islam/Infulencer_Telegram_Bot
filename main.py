@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ, ADMIN_ID, RENDER_EXTERNAL_URL, WEBHOOK_URL, validate_ai_keys
 from bot.database import load_faqs
 from bot.server import ping_self
-from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, auto_post_facebook, greeting_post, weekly_digest, daily_islamic_reminder, evening_islamic_reminder, scheduled_content_hub_post
+from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, auto_post_facebook, auto_post_twitter, greeting_post, weekly_digest, daily_islamic_reminder, evening_islamic_reminder, scheduled_content_hub_post
 from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses
 from bot.handlers.commands import (
     start, socials_command, latest, youtube, medium, substack,
@@ -213,6 +213,10 @@ def build_application() -> Application:
     )
     job_queue.run_daily(
         auto_post_facebook, time=datetime.time(16, 0, tzinfo=BOT_TZ),
+        days=(0, 1, 2, 3, 4, 5, 6)
+    )
+    job_queue.run_daily(
+        auto_post_twitter, time=datetime.time(20, 0, tzinfo=BOT_TZ),
         days=(0, 1, 2, 3, 4, 5, 6)
     )
     job_queue.run_daily(

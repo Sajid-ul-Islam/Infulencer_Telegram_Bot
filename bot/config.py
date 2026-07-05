@@ -59,6 +59,7 @@ INSTAGRAM_LINK = os.getenv("INSTAGRAM_LINK", "https://instagram.com/bearded_bang
 TWITTER_LINK = os.getenv("TWITTER_LINK", "https://x.com/Beraded_Bengali")
 FACEBOOK_LINK = os.getenv("FACEBOOK_LINK", "https://facebook.com/bb3ngali")
 FACEBOOK_RSS_URL = os.getenv("FACEBOOK_RSS_URL", "")
+TWITTER_RSS_URL = os.getenv("TWITTER_RSS_URL", "")
 
 def _is_valid_key(key: str) -> bool:
     """Check if an API key is actually set and not a placeholder.
