@@ -294,7 +294,7 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
     
     history = []
     if use_memory and user_id:
-        from bot.memory import chat_histories, MAX_HISTORY, get_history, add_to_history
+        from bot.memory import _chat_histories, MAX_HISTORY, get_history, add_to_history
         history = get_history(user_id, max_exchanges=3)
         
     # Semantic Caching
@@ -417,11 +417,11 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                     add_to_history(user_id, "user", user_message)
                     add_to_history(user_id, "assistant", final_res)
                     
-                    history_len = len(chat_histories.get(user_id, []))
+                    history_len = len(_chat_histories.get(user_id, []))
                     if history_len > MAX_HISTORY * 2:
-                        summary = await summarize_history(chat_histories[user_id])
+                        summary = await summarize_history(_chat_histories[user_id])
                         if summary:
-                            chat_histories[user_id] = [{"role": "system", "content": f"Previous conversation summary: {summary}"}]
+                            _chat_histories[user_id] = [{"role": "system", "content": f"Previous conversation summary: {summary}"}]
                 
                 if not history:
                     cache_response(user_message, final_res)
