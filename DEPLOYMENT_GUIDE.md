@@ -5,20 +5,30 @@
 ✅ **Auto-Posts Your Content**
 - Fetches latest YouTube videos daily
 - Fetches latest Medium articles daily
+- Fetches latest Substack newsletters daily
 - Posts to your Telegram channel automatically
-- Posts daily greeting to channel
+- Posts daily Islamic reminders (morning & evening)
 
-✅ **Answers Questions**
-- Followers ask questions via DM or group
-- Bot responds with FAQ answers
-- Includes links to all your platforms
+✅ **AI-Powered Q&A**
+- Multi-provider AI with 8 fallback providers
+- Hybrid RAG search over your content + Hisnul Muslim duas + Quran
+- Voice message transcription via Groq Whisper
+- Per-user conversation memory
+
+✅ **Influencer Features**
+- Content scheduling with Firestore persistence
+- Interactive quizzes for channel engagement
+- Channel subscriber stats
+- Personalized DM onboarding for new members
 
 ✅ **Multiple Commands**
-- /latest - Get all latest content
-- /youtube - Get latest video
-- /medium - Get latest article
-- /ask - Ask a question
-- /help - Show all commands
+- `/latest` - Get all latest content
+- `/youtube` - Get latest video
+- `/medium` - Get latest article
+- `/ask` - Ask the AI anything
+- `/dua` - Search 421+ Hisnul Muslim duas
+- `/quran` - Search 6236 Quran verses
+- `/help` - Show all commands
 
 ---
 
@@ -46,6 +56,7 @@ __pycache__/
 *.pyc
 .DS_Store
 venv/
+chroma_db/
 ```
 
 ### Step 3: Push to GitHub
@@ -73,14 +84,38 @@ git push -u origin main
 
 5. Add Environment Variables:
    - Click "Environment"
-   - Add:
+   - Add at minimum:
      ```
      TELEGRAM_TOKEN=your_token_here
      CHANNEL_ID=-100123456789
+     OPENROUTER_API_KEY=sk-or-v1-...
+     GROQ_API_KEY=gsk_...
+     FIREBASE_CREDENTIALS={"type":"service_account",...}
      ```
 
 6. Click "Create Web Service"
 7. Wait for deployment ✅
+
+---
+
+## 🔑 Required Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `TELEGRAM_TOKEN` | ✅ Yes | Bot token from @BotFather |
+| `CHANNEL_ID` | ✅ Yes | Telegram channel ID (starts with -100) |
+| `GROUP_ID` | ⚠️ Optional | Telegram group ID (enables moderation features) |
+| `ADMIN_ID` | ⚠️ Optional | Your Telegram user ID (enables admin commands) |
+| `FIREBASE_CREDENTIALS` | ✅ Yes | Firebase service account JSON |
+| `OPENROUTER_API_KEY` | ✅ Yes | Primary AI provider |
+| `GROQ_API_KEY` | ⚠️ Fallback | Fast inference + voice transcription |
+| `OPENAI_API_KEY` | ⚠️ Fallback | OpenAI direct API |
+| `ANTHROPIC_API_KEY` | ⚠️ Fallback | Anthropic Claude |
+| `GEMINI_API_KEY` | ⚠️ Fallback | Google Gemini |
+| `XAI_API_KEY` | ⚠️ Fallback | xAI Grok |
+| `DEEPSEEK_API_KEY` | ⚠️ Fallback | DeepSeek |
+| `OLLAMA_BASE_URL` | ⚠️ Optional | Local Ollama server URL |
+| `WEBHOOK_URL` | ⚠️ Optional | Explicit webhook URL (falls back to RENDER_EXTERNAL_URL) |
 
 ---
 
@@ -132,39 +167,23 @@ Find `async def start()` function and edit the welcome text.
 
 ### 4. Change Auto-Post Times
 
-Find this section:
+Find this section in `main.py`:
 
 ```python
 # Post latest YouTube daily at 9 AM
-job_queue.run_daily(auto_post_youtube, time=(9, 0), days=(0, 1, 2, 3, 4, 5, 6))
+job_queue.run_daily(auto_post_youtube, time=datetime.time(9, 0, tzinfo=BOT_TZ))
 
 # Post latest Medium daily at 6 PM
-job_queue.run_daily(auto_post_medium, time=(18, 0), days=(0, 1, 2, 3, 4, 5, 6))
+job_queue.run_daily(auto_post_medium, time=datetime.time(18, 0, tzinfo=BOT_TZ))
+
+# Post latest Substack daily at 2 PM
+job_queue.run_daily(auto_post_substack, time=datetime.time(14, 0, tzinfo=BOT_TZ))
 
 # Post greeting daily at 8 AM
-job_queue.run_daily(greeting_post, time=(8, 0), days=(0, 1, 2, 3, 4, 5, 6))
+job_queue.run_daily(greeting_post, time=datetime.time(8, 0, tzinfo=BOT_TZ))
 ```
 
-Times are in 24-hour format. Example:
-- `(9, 0)` = 9:00 AM
-- `(14, 30)` = 2:30 PM
-- `(18, 0)` = 6:00 PM
-
-**Days:** 0=Monday, 1=Tuesday, ... 6=Sunday
-
-### 5. Add More Platforms
-
-To add Instagram or Twitter posts:
-
-```python
-async def get_instagram_latest():
-    """Fetch latest Instagram post"""
-    # You'd need to use Instagram API or web scraping
-    pass
-
-# Then add to auto-posting:
-job_queue.run_daily(auto_post_instagram, time=(19, 0))
-```
+Times are in 24-hour format with timezone support.
 
 ---
 
@@ -172,27 +191,33 @@ job_queue.run_daily(auto_post_instagram, time=(19, 0))
 
 ### Auto-Posting
 The bot checks for new content from:
-- **YouTube:** Uses RSS feed (checks daily)
-- **Medium:** Uses RSS feed (checks daily)
+- **YouTube:** Uses RSS feed (checks daily at 9 AM)
+- **Medium:** Uses RSS feed (checks daily at 6 PM)
+- **Substack:** Uses RSS feed (checks daily at 2 PM)
 - Posts automatically to your channel
 
-### Q&A System
-When someone DMs the bot:
+### AI Q&A System
+When someone DMs the bot or asks in a group:
 1. Bot receives message
-2. Searches FAQ for matching keywords
-3. Returns relevant answer
-4. If no match, shows all platform links
+2. Searches conversation memory for context
+3. Uses hybrid RAG (vector + BM25) to find relevant content
+4. Can call 5 tools: knowledge base, duas, Quran, FAQs, recent content
+5. Falls back through 8 AI providers if one fails
+6. Returns response with feedback buttons (👍/👎)
 
-### Commands
-Users can type:
+### Content Scheduling
 ```
-/start       → Welcome + all links
-/latest      → All latest content
-/youtube     → Latest video
-/medium      → Latest article
-/ask         → Prompt to ask question
-/help        → All commands
+/schedule "2026-07-06 14:00" "Check out my new video!"
+/schedule list          # View pending posts
+/schedule cancel <id>   # Cancel a scheduled post
 ```
+Posts are persisted to Firestore and survive Render restarts.
+
+### Interactive Quizzes
+```
+/quiz "Capital of France?" "Paris" "London" "Berlin" "Paris is the capital of France."
+```
+Correct answer is always the first option. Sent as a Telegram quiz to the channel.
 
 ---
 
@@ -203,58 +228,19 @@ Users can type:
 - Check bot is admin in channel with "Post Messages" permission
 - Check TELEGRAM_TOKEN is valid
 
-**Bot not receiving messages?**
-- Ensure bot is in group/channel
-- Check bot username is correct in Telegram
+**AI not responding?**
+- Run `/checkkeys` to test all API providers
+- Ensure at least OPENROUTER_API_KEY or GROQ_API_KEY is set
+- Check Render logs for provider errors
 
-**Auto-posting not working?**
-- Check YOUTUBE_CHANNEL_ID and MEDIUM_USERNAME are correct
-- Check RSS feeds are valid (visit them in browser)
-- Check Render logs for errors
+**Voice messages not working?**
+- Ensure GROQ_API_KEY is set (uses Groq Whisper)
+- Check voice transcription rate limits
 
 **Check Logs on Render:**
 - Go to your service
 - Click "Logs" tab
-- See what's happening
-
----
-
-## 📈 NEXT STEPS
-
-### Basic (Done Now)
-✅ Bot created
-✅ Auto-posts YouTube/Medium
-✅ Answers questions
-
-### Intermediate (Add Later)
-- [ ] Add Instagram auto-posting (requires API)
-- [ ] Add Twitter/X posting
-- [ ] Store user questions in database
-- [ ] Create user polls/surveys
-
-### Advanced
-- [ ] AI-powered Q&A (use Claude API!)
-- [ ] Database of all your content
-- [ ] Analytics dashboard
-- [ ] Patreon/membership integration
-- [ ] Product store integration
-
----
-
-## 💡 EXAMPLE CUSTOMIZATION
-
-Here's an example if you write about economics:
-
-```python
-FAQ = {
-    "economics": "I write about economic trends and analysis. Read my articles: " + MEDIUM_LINK,
-    "gdp": "GDP analysis posts coming soon! Subscribe to Medium.",
-    "inflation": "Economic inflation is caused by...",
-    "interview": "For interview requests, contact me on: " + TWITTER_LINK,
-    "data": "I use World Bank data and FRED API. Sources in all articles.",
-    "collab": "Let's collaborate! DM on Instagram: " + INSTAGRAM_LINK,
-}
-```
+- Look for ✅/⚠️/🚫 provider status at startup
 
 ---
 
@@ -263,7 +249,10 @@ FAQ = {
 Your bot is now:
 - ✅ Running 24/7 on Render
 - ✅ Auto-posting your content
-- ✅ Answering follower questions
+- ✅ Answering follower questions with AI
+- ✅ Searching duas and Quran verses
+- ✅ Scheduling content for later
+- ✅ Running interactive quizzes
 - ✅ Connecting all your platforms
 
 Monitor it anytime from your Render dashboard. Update the code and just push to GitHub—Render auto-deploys!

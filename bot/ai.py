@@ -1,13 +1,11 @@
 import re
 import json
-import httpx
 import asyncio
-from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, Any
 
 from bot.config import (
     logger, XAI_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY,
-    GROQ_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY,
+    GROQ_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, DEEPSEEK_API_KEY,
     OLLAMA_BASE_URL, OLLAMA_MODEL,
     YOUTUBE_LINK, MEDIUM_LINK, INSTAGRAM_LINK, TWITTER_LINK, FACEBOOK_LINK
 )
@@ -254,10 +252,11 @@ async def summarize_history(history: list) -> str:
     models = [
         ("openrouter/openai/gpt-4o-mini", OPENROUTER_API_KEY),
         ("groq/llama-3.1-8b-instant", GROQ_API_KEY),
-        ("gemini/gemini-1.5-flash", GEMINI_API_KEY),
+        ("gemini/gemini-2.0-flash", GEMINI_API_KEY),
         ("openai/gpt-4o-mini", OPENAI_API_KEY),
+        ("deepseek/deepseek-chat", DEEPSEEK_API_KEY),
         ("anthropic/claude-3-haiku-20240307", ANTHROPIC_API_KEY),
-        ("xai/grok-2", XAI_API_KEY)
+        ("xai/grok-3", XAI_API_KEY)
     ]
     
     if is_valid_key(OLLAMA_BASE_URL):
@@ -311,19 +310,23 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
     models = [
         ("openrouter/openai/gpt-4o-mini", OPENROUTER_API_KEY, "OpenRouter"),
         ("groq/llama-3.1-8b-instant", GROQ_API_KEY, "Groq"),
-        ("gemini/gemini-1.5-flash", GEMINI_API_KEY, "Gemini"),
+        ("gemini/gemini-2.0-flash", GEMINI_API_KEY, "Gemini"),
         ("openai/gpt-4o-mini", OPENAI_API_KEY, "OpenAI"),
+        ("deepseek/deepseek-chat", DEEPSEEK_API_KEY, "DeepSeek"),
         ("anthropic/claude-3-haiku-20240307", ANTHROPIC_API_KEY, "Anthropic"),
-        ("xai/grok-2", XAI_API_KEY, "xAI")
+        ("xai/grok-3", XAI_API_KEY, "xAI")
     ]
     
     if is_valid_key(OLLAMA_BASE_URL):
         models.append((f"ollama/{OLLAMA_MODEL}", "dummy_key", "Ollama"))
         
     final_res = None
+    attempted_providers = []
+    skipped_providers = []
     
     for model_name, api_key, provider_name in models:
         if provider_name != "Ollama" and not is_valid_key(api_key):
+            skipped_providers.append(provider_name)
             continue
             
         # Circuit breaker
@@ -338,6 +341,7 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                     
         try:
             logger.info(f"Attempting inference with {model_name}")
+            attempted_providers.append(provider_name)
             
             # Copy the messages list so that if this provider fails, the mutation doesn't affect subsequent providers
             provider_messages = list(messages)
@@ -354,6 +358,9 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                 if provider_name == "Ollama":
                     kwargs["api_base"] = OLLAMA_BASE_URL
                     kwargs["tools"] = TOOLS
+                elif provider_name == "DeepSeek":
+                    # DeepSeek deepseek-chat does not support function calling
+                    pass
                 else:
                     kwargs["tools"] = TOOLS
                     
@@ -433,6 +440,12 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
             fail_time, fail_count = FAILED_PROVIDERS.get(model_name, (time.time(), 0))
             FAILED_PROVIDERS[model_name] = (time.time(), fail_count + 1)
             
+    # All providers failed or were skipped — log detailed diagnostics
+    logger.error(
+        f"AI assistant: all providers exhausted for user {user_id}. "
+        f"Attempted: {[p for p in attempted_providers]}, "
+        f"Skipped (no valid key): {skipped_providers}"
+    )
     return None
 
 def get_faq_response(user_message: str) -> Optional[str]:

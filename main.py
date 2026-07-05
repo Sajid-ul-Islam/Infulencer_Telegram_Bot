@@ -5,7 +5,7 @@ import threading
 import uvicorn
 from telegram import Update, BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeChat
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, InlineQueryHandler
-from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ, ADMIN_ID, RENDER_EXTERNAL_URL, WEBHOOK_URL
+from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ, ADMIN_ID, RENDER_EXTERNAL_URL, WEBHOOK_URL, validate_ai_keys
 from bot.database import load_faqs
 from bot.server import ping_self
 from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, greeting_post, weekly_digest, daily_islamic_reminder, evening_islamic_reminder
@@ -19,15 +19,26 @@ from bot.handlers.admin import (
     postlatest_command, ban_command, mute_command, questions_command,
     poll_command, broadcast_command, addfaq_command, rmfaq_command,
     listfaq_command, stats_command, ingest_kb_command, ingest_duas_command, ingest_quran_kb_command, suggest_command,
-    listsuggestions_command, startgiveaway_command, pickwinner_command
+    listsuggestions_command, startgiveaway_command, pickwinner_command,
+    schedule_command, channelstats_command, quiz_command, checkkeys_command
 )
 from bot.handlers.messages import handle_message, welcome_new_members, button_callback_handler, handle_voice
 from bot.handlers.inline import inline_query
 
 
 async def background_init(app):
+    loop = asyncio.get_event_loop()
+
+    # Load persisted scheduled posts from Firestore into memory
     try:
-        loop = asyncio.get_event_loop()
+        from bot.handlers.influencer import _load_pending_posts_from_firestore
+        count = await loop.run_in_executor(None, _load_pending_posts_from_firestore)
+        if count:
+            logger.info(f"Restored {count} pending scheduled posts from Firestore.")
+    except Exception as e:
+        logger.warning(f"Scheduled posts load failed (non-blocking): {e}")
+
+    try:
         await loop.run_in_executor(None, load_faqs)
         logger.info("FAQs loaded from Firestore.")
     except Exception as e:
@@ -111,6 +122,10 @@ async def post_init(application: Application):
             BotCommand("ingestquran", "Re-index Quran verses"),
             BotCommand("startgiveaway", "Start a giveaway"),
             BotCommand("pickwinner", "Pick giveaway winner"),
+            BotCommand("schedule", "Schedule a post for later"),
+            BotCommand("channelstats", "Show channel & bot stats"),
+            BotCommand("quiz", "Send an interactive quiz"),
+            BotCommand("checkkeys", "Test API keys live"),
         ]
         try:
             await application.bot.set_my_commands(
@@ -162,6 +177,10 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("listsuggestions", listsuggestions_command))
     application.add_handler(CommandHandler("startgiveaway", startgiveaway_command))
     application.add_handler(CommandHandler("pickwinner", pickwinner_command))
+    application.add_handler(CommandHandler("schedule", schedule_command))
+    application.add_handler(CommandHandler("channelstats", channelstats_command))
+    application.add_handler(CommandHandler("quiz", quiz_command))
+    application.add_handler(CommandHandler("checkkeys", checkkeys_command))
 
     application.add_handler(InlineQueryHandler(inline_query))
     application.add_handler(CallbackQueryHandler(button_callback_handler))
@@ -292,6 +311,8 @@ async def async_main():
 
 
 def main():
+    # Validate AI provider keys immediately so diagnostics appear first in logs
+    validate_ai_keys()
     asyncio.run(async_main())
 
 

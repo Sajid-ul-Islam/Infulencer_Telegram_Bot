@@ -141,6 +141,37 @@ async def ingest_quran_verses(force_reindex: bool = False) -> int:
         logger.error(f"Quran ingestion failed: {e}")
         return 0
 
+async def ingest_text_content(title: str, content: str, platform: str, url: str = "") -> int:
+    """Ingest raw text content (e.g. YouTube transcription) into the document store."""
+    if not _vdb_available or not content:
+        return 0
+    import hashlib
+    content_hash = hashlib.md5(content.encode()).hexdigest()[:12]
+    post_id = f"{platform}_transcript_{content_hash}"
+    if vectordb.document_exists(post_id):
+        logger.info(f"Transcript already indexed: {post_id}")
+        return 0
+    post = {
+        "id": post_id,
+        "platform": platform.replace("_", " ").title(),
+        "title": title,
+        "content": content[:10000],
+        "url": url,
+        "date": "",
+    }
+    chunks = chunk_document(post)
+    chunks_to_add = [{
+        "id": c["id"], "platform": c["platform"], "title": c["title"],
+        "content": c["content"], "url": c["url"], "date": c["date"]
+    } for c in chunks]
+    if chunks_to_add:
+        vectordb.add_documents(chunks_to_add)
+        rebuild_bm25_index()
+        logger.info(f"Ingested {len(chunks_to_add)} chunks from {platform} transcript: {title}")
+        return len(chunks_to_add)
+    return 0
+
+
 def get_pipeline_stats() -> dict:
     if not _vdb_available:
         return {"vector_documents": 0, "kb_entries": len(load_knowledge_base()), "dua_count": 0, "quran_count": 0}

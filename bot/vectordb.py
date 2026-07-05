@@ -142,13 +142,18 @@ class InMemoryDocStore:
         back to BM25 when vector results are empty."""
         return []
 
-    def query_documents(self, where: Optional[Dict[str, Any]] = None,
-                        include: Optional[List[str]] = None,
-                        limit: Optional[int] = None) -> Dict[str, Any]:
-        """Replaces ChromaDB's collection.get() — filters documents by metadata.
-        Returns dict with 'ids', 'documents', 'metadatas' keys (ChromaDB-compatible shape).
+    def get(self, ids: Optional[List[str]] = None,
+            where: Optional[Dict[str, Any]] = None,
+            include: Optional[List[str]] = None,
+            limit: Optional[int] = None) -> Dict[str, Any]:
+        """ChromaDB-compatible get() interface — filters documents by ID or metadata.
+        Returns dict with 'ids', 'documents', 'metadatas' keys.
         """
         filtered = list(self._documents)
+
+        if ids:
+            id_set = set(ids)
+            filtered = [d for d in filtered if d["id"] in id_set]
 
         if where:
             for key, value in where.items():
@@ -163,6 +168,14 @@ class InMemoryDocStore:
             "metadatas": [d["metadata"] for d in filtered] if include and "metadatas" in include
                          else ([{}] * len(filtered) if include else []),
         }
+
+    def query_documents(self, where: Optional[Dict[str, Any]] = None,
+                        include: Optional[List[str]] = None,
+                        limit: Optional[int] = None) -> Dict[str, Any]:
+        """Alias for get() — filters documents by metadata.
+        Returns dict with 'ids', 'documents', 'metadatas' keys.
+        """
+        return self.get(where=where, include=include, limit=limit)
 
 
 # ── Global singleton ─────────────────────────────────────────────

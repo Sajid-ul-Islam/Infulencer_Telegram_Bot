@@ -393,6 +393,78 @@ def get_subscribed_users_by_time(time_pref: str) -> list[int]:
         return []
 
 
+SCHEDULED_POSTS_COLLECTION = "scheduled_posts"
+
+
+def save_scheduled_post(post_id: str, text: str, send_at: str, parse_mode: str = "HTML") -> bool:
+    """Persist a scheduled post to Firestore."""
+    if not db:
+        return False
+    try:
+        db.collection(SCHEDULED_POSTS_COLLECTION).document(post_id).set({
+            "text": text,
+            "send_at": send_at,
+            "parse_mode": parse_mode,
+            "status": "scheduled",
+            "created_at": google_firestore.SERVER_TIMESTAMP,
+        })
+        return True
+    except Exception as e:
+        logger.error(f"Error saving scheduled post {post_id}: {e}")
+        return False
+
+
+def update_scheduled_post_status(post_id: str, status: str) -> bool:
+    """Update the status of a scheduled post (sent, failed, cancelled)."""
+    if not db:
+        return False
+    try:
+        db.collection(SCHEDULED_POSTS_COLLECTION).document(post_id).update({
+            "status": status,
+        })
+        return True
+    except Exception as e:
+        logger.error(f"Error updating scheduled post {post_id}: {e}")
+        return False
+
+
+def get_pending_scheduled_posts() -> list[dict]:
+    """Load all posts with status='scheduled' from Firestore.
+    Note: Requires a composite index on (status, send_at) in the scheduled_posts collection.
+    Firestore auto-creates this on first query, but if it fails, create it manually in the Firebase console.
+    """
+    if not db:
+        return []
+    try:
+        docs = (
+            db.collection(SCHEDULED_POSTS_COLLECTION)
+            .where("status", "==", "scheduled")
+            .order_by("send_at")
+            .stream()
+        )
+        posts = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            posts.append(data)
+        return posts
+    except Exception as e:
+        logger.error(f"Error loading scheduled posts: {e}")
+        return []
+
+
+def delete_scheduled_post(post_id: str) -> bool:
+    """Delete a scheduled post from Firestore."""
+    if not db:
+        return False
+    try:
+        db.collection(SCHEDULED_POSTS_COLLECTION).document(post_id).delete()
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting scheduled post {post_id}: {e}")
+        return False
+
+
 BOOKMARKS_COLLECTION = "user_bookmarks"
 
 def save_bookmark(user_id: int, item_id: str, doc_type: str, title: str, snippet: str, url: str = "") -> bool:
