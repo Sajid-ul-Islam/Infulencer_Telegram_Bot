@@ -7,7 +7,7 @@ from telegram.ext import ContextTypes
 from firebase_admin import firestore
 from bot.config import logger, is_admin, CHANNEL_ID, BOT_TZ
 from bot.database import db, FAQ, save_faq, remove_faq, track_activity, get_feedback_counts
-from bot.jobs import send_channel_message, auto_post_youtube, auto_post_medium, auto_post_substack
+from bot.jobs import send_channel_message, auto_post_youtube, auto_post_medium, auto_post_substack, auto_post_facebook
 from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses, get_pipeline_stats
 from bot.vectordb import get_document_count
 from bot.handlers.commands import clean_command_query
@@ -65,6 +65,7 @@ async def postlatest_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await auto_post_youtube(context)
     await auto_post_medium(context)
     await auto_post_substack(context)
+    await auto_post_facebook(context)
     await update.message.reply_text("✅ Done!")
 
 async def questions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

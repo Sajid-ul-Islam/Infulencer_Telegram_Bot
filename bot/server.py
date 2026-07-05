@@ -86,7 +86,7 @@ def ping_self():
 def check_and_sync_rss_manually():
     """Manually fetches latest YouTube, Medium, and Substack entries and broadcasts to channel if new."""
     import bot.jobs
-    from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
+    from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts, get_facebook_posts
 
     def send_tg_message(text, reply_markup=None):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -133,6 +133,18 @@ def check_and_sync_rss_manually():
                 logger.info(f"Manual Sync: Posted Substack newsletter: {link}")
     except Exception as e:
         logger.error(f"Error manually syncing Substack: {e}")
+
+    # Sync Facebook
+    try:
+        fb_msg, fb_btn, link = run_async(get_facebook_posts(limit=1))
+        if fb_msg and link and link != bot.jobs.last_posted_facebook_url:
+            reply_markup = {"inline_keyboard": [[{"text": fb_btn.text, "url": fb_btn.url}]]} if fb_btn else None
+            if send_tg_message(fb_msg, reply_markup):
+                bot.jobs.last_posted_facebook_url = link
+                posts_sent += 1
+                logger.info(f"Manual Sync: Posted Facebook post: {link}")
+    except Exception as e:
+        logger.error(f"Error manually syncing Facebook: {e}")
 
     return posts_sent
 

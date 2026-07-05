@@ -2,7 +2,7 @@ import html
 import httpx
 import feedparser
 from telegram import InlineKeyboardButton
-from bot.config import logger, YOUTUBE_CHANNEL_ID, YOUTUBE_LINK, MEDIUM_USERNAME, MEDIUM_LINK, SUBSTACK_URL
+from bot.config import logger, YOUTUBE_CHANNEL_ID, YOUTUBE_LINK, MEDIUM_USERNAME, MEDIUM_LINK, SUBSTACK_URL, FACEBOOK_LINK, FACEBOOK_RSS_URL
 
 async def extract_article_text(url: str) -> str:
     try:
@@ -99,6 +99,47 @@ async def get_substack_posts(limit=3, return_url_only=False):
             return message.strip(), button, feed.entries[0].link
     except Exception as e:
         logger.error(f"Error fetching Substack: {e}")
+    
+    if return_url_only: return None
+    return None, None, None
+
+async def get_facebook_posts(limit=3, return_url_only=False):
+    """Fetch latest Facebook posts from configured RSS url"""
+    if not FACEBOOK_RSS_URL:
+        logger.warning("FACEBOOK_RSS_URL not configured. Skipping Facebook RSS fetch.")
+        if return_url_only: return None
+        return None, None, None
+        
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(FACEBOOK_RSS_URL)
+            feed = feedparser.parse(response.content)
+            
+        if feed.entries:
+            if return_url_only:
+                return feed.entries[0].link
+
+            message = "👍 <b>Latest Facebook Posts:</b>\n\n"
+            for i, entry in enumerate(feed.entries[:limit]):
+                # Fallback to summary or description if title is too short or generic
+                title = entry.title
+                if not title or len(title) < 5:
+                    title = entry.summary or entry.description or "New Post"
+                
+                # Strip HTML tags from title for clean display
+                import re
+                clean_title = re.sub(r'<[^>]+>', '', title)
+                clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+                if len(clean_title) > 60:
+                    clean_title = clean_title[:60] + "..."
+                
+                safe_title = html.escape(clean_title)
+                message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>View Post</a>\n\n"
+            
+            button = InlineKeyboardButton("View Facebook Page 👍", url=FACEBOOK_LINK)
+            return message.strip(), button, feed.entries[0].link
+    except Exception as e:
+        logger.error(f"Error fetching Facebook RSS: {e}")
     
     if return_url_only: return None
     return None, None, None

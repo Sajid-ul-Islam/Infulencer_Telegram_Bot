@@ -4,13 +4,14 @@ from urllib.parse import quote
 from telegram import InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot.config import logger, CHANNEL_ID, BOT_TZ
-from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
+from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts, get_facebook_posts
 from bot.pipeline import ingest_rss_content
 from bot.transcriber import transcribe_youtube
 
 last_posted_youtube_url = None
 last_posted_medium_url = None
 last_posted_substack_url = None
+last_posted_facebook_url = None
 
 async def send_channel_message(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
     if not CHANNEL_ID:
@@ -95,6 +96,18 @@ async def auto_post_substack(context: ContextTypes.DEFAULT_TYPE):
         await ingest_rss_content()
     except Exception as e:
         logger.error(f"Error in auto_post_substack: {e}")
+
+async def auto_post_facebook(context: ContextTypes.DEFAULT_TYPE):
+    global last_posted_facebook_url
+    try:
+        fb_msg, fb_btn, link = await get_facebook_posts(limit=1)
+        if fb_msg and link and link != last_posted_facebook_url:
+            reply_markup = InlineKeyboardMarkup([[fb_btn]]) if fb_btn else None
+            await send_channel_message(context, fb_msg, reply_markup=reply_markup)
+            last_posted_facebook_url = link
+        await ingest_rss_content()
+    except Exception as e:
+        logger.error(f"Error in auto_post_facebook: {e}")
 
 async def _pick_random_document(doc_type: str) -> Optional[dict]:
     """Picks a random document of the given type from the vector DB."""
@@ -309,10 +322,12 @@ async def scheduled_content_hub_post(context: ContextTypes.DEFAULT_TYPE):
     import feedparser
     import html
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from bot.config import YOUTUBE_CHANNEL_ID, MEDIUM_USERNAME, SUBSTACK_URL, YOUTUBE_LINK, MEDIUM_LINK
+    from bot.config import YOUTUBE_CHANNEL_ID, MEDIUM_USERNAME, SUBSTACK_URL, YOUTUBE_LINK, MEDIUM_LINK, FACEBOOK_LINK, FACEBOOK_RSS_URL
     
     # Select random platform
     platforms = ["youtube", "medium", "substack"]
+    if FACEBOOK_RSS_URL:
+        platforms.append("facebook")
     random.shuffle(platforms)
     
     # We will try platforms until one succeeded
@@ -330,12 +345,18 @@ async def scheduled_content_hub_post(context: ContextTypes.DEFAULT_TYPE):
                 btn_text = "Read Article 📝"
                 emoji = "📝"
                 type_name = "Article"
-            else:  # substack
+            elif platform == "substack":
                 rss_url = f"{SUBSTACK_URL.rstrip('/')}/feed"
                 profile_link = SUBSTACK_URL
                 btn_text = "Read Issue 📰"
                 emoji = "📰"
                 type_name = "Newsletter"
+            else:  # facebook
+                rss_url = FACEBOOK_RSS_URL
+                profile_link = FACEBOOK_LINK
+                btn_text = "View Post 👍"
+                emoji = "👍"
+                type_name = "Facebook Post"
                 
             # Parse feed
             import httpx
@@ -363,7 +384,19 @@ async def scheduled_content_hub_post(context: ContextTypes.DEFAULT_TYPE):
             if not selected_entry:
                 continue
                 
-            title = html.escape(selected_entry.title)
+            if platform == "facebook":
+                title_text = selected_entry.title
+                if not title_text or len(title_text) < 5:
+                    title_text = selected_entry.summary or selected_entry.description or "New Post"
+                import re
+                clean_title = re.sub(r'<[^>]+>', '', title_text)
+                clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+                if len(clean_title) > 80:
+                    clean_title = clean_title[:80] + "..."
+                title = html.escape(clean_title)
+            else:
+                title = html.escape(selected_entry.title)
+                
             link = selected_entry.link
             
             # Format message
