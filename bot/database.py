@@ -21,7 +21,12 @@ if FIREBASE_CREDENTIALS:
         # If token refresh succeeded, credentials are valid! Now initialize Firebase admin client
         cred = credentials.Certificate(cred_dict)
         firebase_admin.initialize_app(cred)
-        db = firestore.client()
+        client_instance = firestore.client()
+        
+        # Verify Cloud Firestore API is enabled and accessible by performing a lightweight query
+        client_instance.collection("faqs").limit(1).get()
+        
+        db = client_instance
         logger.info("Firebase Firestore connection verified and initialized successfully.")
     except Exception as e:
         logger.error(f"Error initializing Firebase — Firestore disabled: {e}")
