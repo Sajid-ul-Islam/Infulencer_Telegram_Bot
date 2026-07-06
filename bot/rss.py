@@ -27,7 +27,7 @@ async def extract_article_text(url: str) -> str:
         text = text[:3000] + "..."
     return text or f"No readable content found at {url}"
 
-async def get_youtube_posts(limit=3, return_url_only=False):
+async def get_youtube_posts(limit=3, return_url_only=False, random_old=False):
     """Fetch latest YouTube videos"""
     try:
         rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={YOUTUBE_CHANNEL_ID}"
@@ -39,20 +39,27 @@ async def get_youtube_posts(limit=3, return_url_only=False):
             if return_url_only:
                 return feed.entries[0].link
 
-            message = "🎥 <b>Latest Videos:</b>\n\n"
-            for i, entry in enumerate(feed.entries[:limit]):
+            if random_old and len(feed.entries) > 1:
+                import random
+                entries_to_use = random.sample(feed.entries[1:], min(limit, len(feed.entries) - 1))
+                message = "🎥 <b>Throwback Video:</b>\n\n"
+            else:
+                entries_to_use = feed.entries[:limit]
+                message = "🎥 <b>Latest Videos:</b>\n\n"
+
+            for i, entry in enumerate(entries_to_use):
                 safe_title = html.escape(entry.title)
                 message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>Watch Now</a>\n\n"
             
             button = InlineKeyboardButton("View Channel 📺", url=YOUTUBE_LINK)
-            return message.strip(), button, feed.entries[0].link
+            return message.strip(), button, entries_to_use[0].link
     except Exception as e:
         logger.error(f"Error fetching YouTube: {e}")
     
     if return_url_only: return None
     return None, None, None
 
-async def get_medium_posts(limit=3, return_url_only=False):
+async def get_medium_posts(limit=3, return_url_only=False, random_old=False):
     """Fetch latest Medium articles"""
     try:
         rss_url = f"https://medium.com/feed/@{MEDIUM_USERNAME}"
@@ -64,20 +71,27 @@ async def get_medium_posts(limit=3, return_url_only=False):
             if return_url_only:
                 return feed.entries[0].link
 
-            message = "📝 <b>Latest Articles:</b>\n\n"
-            for i, entry in enumerate(feed.entries[:limit]):
+            if random_old and len(feed.entries) > 1:
+                import random
+                entries_to_use = random.sample(feed.entries[1:], min(limit, len(feed.entries) - 1))
+                message = "📝 <b>Throwback Article:</b>\n\n"
+            else:
+                entries_to_use = feed.entries[:limit]
+                message = "📝 <b>Latest Articles:</b>\n\n"
+
+            for i, entry in enumerate(entries_to_use):
                 safe_title = html.escape(entry.title)
                 message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>Read Now</a>\n\n"
             
             button = InlineKeyboardButton("View Profile 📝", url=MEDIUM_LINK)
-            return message.strip(), button, feed.entries[0].link
+            return message.strip(), button, entries_to_use[0].link
     except Exception as e:
         logger.error(f"Error fetching Medium: {e}")
     
     if return_url_only: return None
     return None, None, None
 
-async def get_substack_posts(limit=3, return_url_only=False):
+async def get_substack_posts(limit=3, return_url_only=False, random_old=False):
     """Fetch latest Substack newsletters"""
     try:
         # Substack RSS feed is always base_url/feed
@@ -90,20 +104,27 @@ async def get_substack_posts(limit=3, return_url_only=False):
             if return_url_only:
                 return feed.entries[0].link
 
-            message = "📰 <b>Latest Newsletters:</b>\n\n"
-            for i, entry in enumerate(feed.entries[:limit]):
+            if random_old and len(feed.entries) > 1:
+                import random
+                entries_to_use = random.sample(feed.entries[1:], min(limit, len(feed.entries) - 1))
+                message = "📰 <b>Throwback Newsletter:</b>\n\n"
+            else:
+                entries_to_use = feed.entries[:limit]
+                message = "📰 <b>Latest Newsletters:</b>\n\n"
+
+            for i, entry in enumerate(entries_to_use):
                 safe_title = html.escape(entry.title)
                 message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>Read Issue</a>\n\n"
             
             button = InlineKeyboardButton("Subscribe on Substack 📰", url=SUBSTACK_URL)
-            return message.strip(), button, feed.entries[0].link
+            return message.strip(), button, entries_to_use[0].link
     except Exception as e:
         logger.error(f"Error fetching Substack: {e}")
     
     if return_url_only: return None
     return None, None, None
 
-async def get_facebook_posts(limit=3, return_url_only=False):
+async def get_facebook_posts(limit=3, return_url_only=False, random_old=False):
     """Fetch latest Facebook posts from configured RSS url"""
     if not FACEBOOK_RSS_URL:
         logger.warning("FACEBOOK_RSS_URL not configured. Skipping Facebook RSS fetch.")
@@ -119,8 +140,15 @@ async def get_facebook_posts(limit=3, return_url_only=False):
             if return_url_only:
                 return feed.entries[0].link
 
-            message = "👍 <b>Latest Facebook Posts:</b>\n\n"
-            for i, entry in enumerate(feed.entries[:limit]):
+            if random_old and len(feed.entries) > 1:
+                import random
+                entries_to_use = random.sample(feed.entries[1:], min(limit, len(feed.entries) - 1))
+                message = "👍 <b>Throwback Facebook Post:</b>\n\n"
+            else:
+                entries_to_use = feed.entries[:limit]
+                message = "👍 <b>Latest Facebook Posts:</b>\n\n"
+
+            for i, entry in enumerate(entries_to_use):
                 # Fallback to summary or description if title is too short or generic
                 title = entry.title
                 if not title or len(title) < 5:
@@ -137,14 +165,14 @@ async def get_facebook_posts(limit=3, return_url_only=False):
                 message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>View Post</a>\n\n"
             
             button = InlineKeyboardButton("View Facebook Page 👍", url=FACEBOOK_LINK)
-            return message.strip(), button, feed.entries[0].link
+            return message.strip(), button, entries_to_use[0].link
     except Exception as e:
         logger.error(f"Error fetching Facebook RSS: {e}")
     
     if return_url_only: return None
     return None, None, None
 
-async def get_twitter_posts(limit=3, return_url_only=False):
+async def get_twitter_posts(limit=3, return_url_only=False, random_old=False):
     """Fetch latest Twitter/X posts from configured RSS url"""
     if not TWITTER_RSS_URL:
         logger.warning("TWITTER_RSS_URL not configured. Skipping Twitter RSS fetch.")
@@ -160,8 +188,15 @@ async def get_twitter_posts(limit=3, return_url_only=False):
             if return_url_only:
                 return feed.entries[0].link
 
-            message = "🐦 <b>Latest Tweets:</b>\n\n"
-            for i, entry in enumerate(feed.entries[:limit]):
+            if random_old and len(feed.entries) > 1:
+                import random
+                entries_to_use = random.sample(feed.entries[1:], min(limit, len(feed.entries) - 1))
+                message = "🐦 <b>Throwback Tweet:</b>\n\n"
+            else:
+                entries_to_use = feed.entries[:limit]
+                message = "🐦 <b>Latest Tweets:</b>\n\n"
+
+            for i, entry in enumerate(entries_to_use):
                 title = entry.title
                 if not title or len(title) < 5:
                     title = entry.summary or entry.description or "New Tweet"
@@ -177,7 +212,7 @@ async def get_twitter_posts(limit=3, return_url_only=False):
                 message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>View Tweet</a>\n\n"
             
             button = InlineKeyboardButton("View Twitter Page 🐦", url=TWITTER_LINK)
-            return message.strip(), button, feed.entries[0].link
+            return message.strip(), button, entries_to_use[0].link
     except Exception as e:
         logger.error(f"Error fetching Twitter RSS: {e}")
     
