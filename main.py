@@ -219,27 +219,27 @@ def build_application() -> Application:
     )
     job_queue.run_repeating(
         auto_post_youtube,
-        interval=7200,
+        interval=21600,
         first=20
     )
     job_queue.run_repeating(
         auto_post_medium,
-        interval=7200,
+        interval=21600,
         first=50
     )
     job_queue.run_repeating(
         auto_post_substack,
-        interval=7200,
+        interval=21600,
         first=60
     )
     job_queue.run_repeating(
         auto_post_facebook,
-        interval=7200,
+        interval=21600,
         first=40
     )
     job_queue.run_repeating(
         auto_post_twitter,
-        interval=7200,
+        interval=21600,
         first=30
     )
     job_queue.run_daily(
@@ -253,7 +253,7 @@ def build_application() -> Application:
 
     job_queue.run_repeating(
         scheduled_content_hub_post,
-        interval=7200,
+        interval=21600,
         first=10
     )
 
