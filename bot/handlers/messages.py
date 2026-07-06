@@ -318,3 +318,14 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         return
 
     logger.warning(f"Unhandled callback data: {data}")
+
+async def handle_pdf_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Detect raw PDF uploads and guide the user on how to ingest them."""
+    doc = update.message.document
+    if doc and doc.file_name and doc.file_name.lower().endswith('.pdf'):
+        await update.message.reply_text(
+            f"📄 I received your PDF: <b>{doc.file_name}</b>\n\n"
+            "If you want to add this book to my AI knowledge base so users can study it, simply reply to your PDF message above with:\n\n"
+            "`/ingestpdf Book Name`",
+            parse_mode="HTML"
+        )

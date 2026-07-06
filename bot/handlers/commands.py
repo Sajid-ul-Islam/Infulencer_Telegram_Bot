@@ -635,7 +635,7 @@ async def ingestpdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("\u26d4 The replied document must be a PDF file.")
         return
         
-    await update.message.reply_text(f"\U0001f504 Downloading and extracting text from '{doc.file_name}' as book: <b>{query}</b>...", parse_mode="HTML")
+    status_msg = await update.message.reply_text(f"📥 Downloading '{doc.file_name}'...", parse_mode="HTML")
     
     try:
         import os
@@ -643,17 +643,23 @@ async def ingestpdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         temp_path = f"temp_{doc.file_id}.pdf"
         await file.download_to_drive(temp_path)
         
+        async def progress_cb(msg_text):
+            try:
+                await status_msg.edit_text(msg_text)
+            except Exception:
+                pass
+        
         from bot.pipeline import ingest_pdf
-        chunks_added = await ingest_pdf(temp_path, query)
+        chunks_added = await ingest_pdf(temp_path, query, progress_callback=progress_cb)
         
         if os.path.exists(temp_path):
             os.remove(temp_path)
             
         if chunks_added > 0:
-            await update.message.reply_text(f"\u2705 <b>Success!</b>\nIngested {chunks_added} chunks for the book '{query}'. Users can now study it.", parse_mode="HTML")
+            await status_msg.edit_text(f"✅ <b>Success!</b>\nIngested {chunks_added} chunks for the book '{query}'. Users can now study it.", parse_mode="HTML")
         else:
-            await update.message.reply_text(f"\u274c Failed to extract text from the PDF. It might be scanned or empty.")
+            await status_msg.edit_text(f"❌ Failed to extract text from the PDF. It might be scanned or empty.")
             
     except Exception as e:
         logger.error(f"Error in ingestpdf_command: {e}")
-        await update.message.reply_text(f"\u274c An error occurred: {str(e)}")
+        await status_msg.edit_text(f"❌ An error occurred: {str(e)}")

@@ -200,6 +200,10 @@ def build_application() -> Application:
 
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    
+    from bot.handlers.messages import handle_pdf_upload
+    application.add_handler(MessageHandler(filters.Document.PDF, handle_pdf_upload))
+    
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Schedule recurring jobs

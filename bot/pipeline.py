@@ -182,15 +182,18 @@ def get_pipeline_stats() -> dict:
         "quran_count": vectordb.count_by_type("quran"),
     }
 
-async def ingest_pdf(file_path: str, book_name: str) -> int:
+async def ingest_pdf(file_path: str, book_name: str, progress_callback=None) -> int:
     """Extracts text from a PDF and ingests it as a book into the document store."""
     if not _vdb_available:
         return 0
     try:
+        if progress_callback: await progress_callback("⏳ Opening PDF...")
         import fitz
         import re
         doc = fitz.open(file_path)
         full_text = ""
+        
+        if progress_callback: await progress_callback(f"📖 Extracting text from {len(doc)} pages...")
         for page in doc:
             full_text += page.get_text() + "\n"
         
@@ -204,6 +207,7 @@ async def ingest_pdf(file_path: str, book_name: str) -> int:
             "url": ""
         }
         
+        if progress_callback: await progress_callback("✂️ Chunking extracted text...")
         chunks = chunk_document(post, chunk_size=800, chunk_overlap=150)
         
         chunks_to_add = []
@@ -219,6 +223,7 @@ async def ingest_pdf(file_path: str, book_name: str) -> int:
             })
             
         if chunks_to_add:
+            if progress_callback: await progress_callback(f"🧠 Indexing {len(chunks_to_add)} chunks into knowledge base...")
             from bot import vectordb
             vectordb.add_documents(chunks_to_add)
             rebuild_bm25_index()
