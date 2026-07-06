@@ -220,27 +220,27 @@ def build_application() -> Application:
     job_queue.run_repeating(
         auto_post_youtube,
         interval=21600,
-        first=20
+        first=3600
     )
     job_queue.run_repeating(
         auto_post_medium,
         interval=21600,
-        first=50
+        first=4500
     )
     job_queue.run_repeating(
         auto_post_substack,
         interval=21600,
-        first=60
+        first=5400
     )
     job_queue.run_repeating(
         auto_post_facebook,
         interval=21600,
-        first=40
+        first=6300
     )
     job_queue.run_repeating(
         auto_post_twitter,
         interval=21600,
-        first=30
+        first=7200
     )
     job_queue.run_daily(
         greeting_post, time=datetime.time(8, 0, tzinfo=BOT_TZ),
@@ -254,7 +254,7 @@ def build_application() -> Application:
     job_queue.run_repeating(
         scheduled_content_hub_post,
         interval=21600,
-        first=10
+        first=8100
     )
 
     # Queue processor runs every 15 minutes (900 seconds)
