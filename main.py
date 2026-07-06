@@ -98,6 +98,14 @@ async def post_init(application: Application):
         BotCommand("socials", "Links to all my platforms"),
         BotCommand("suggest", "Suggest a topic idea"),
         BotCommand("forget", "Clear conversation history"),
+        BotCommand("study", "Study a specific book"),
+        BotCommand("stopstudy", "Stop studying the book"),
+        BotCommand("ingestpdf", "Upload a PDF as a book"),
+        BotCommand("subscribe", "Get daily Islamic reminders"),
+        BotCommand("unsubscribe", "Stop daily reminders"),
+        BotCommand("remindertime", "Change reminder time"),
+        BotCommand("myduas", "View your bookmarked duas"),
+        BotCommand("language", "Set language preference")
     ]
     try:
         await application.bot.set_my_commands(commands, scope=BotCommandScopeDefault())
@@ -121,6 +129,7 @@ async def post_init(application: Application):
             BotCommand("ingestkb", "Re-index creator knowledge base"),
             BotCommand("ingestduas", "Re-index Hisnul Muslim duas"),
             BotCommand("ingestquran", "Re-index Quran verses"),
+            BotCommand("ingest", "Re-index main knowledge base"),
             BotCommand("startgiveaway", "Start a giveaway"),
             BotCommand("pickwinner", "Pick giveaway winner"),
             BotCommand("schedule", "Schedule a post for later"),

@@ -123,6 +123,24 @@ TOOLS: List[Dict[str, Any]] = [
                 "required": ["query"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_telegram_command",
+            "description": "Executes a built-in Telegram command to manage the user's settings. Use this when the user asks to subscribe/unsubscribe to reminders, clear chat history, change language, or stop studying.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command_name": {
+                        "type": "string",
+                        "enum": ["subscribe", "unsubscribe", "remindertime_morning", "remindertime_evening", "forget", "language_en", "language_bn", "stopstudy"],
+                        "description": "The command action to execute."
+                    }
+                },
+                "required": ["command_name"]
+            }
+        }
     }
 ]
 
@@ -138,6 +156,7 @@ Rules:
 - Use the get_faq_answer tool for common quick questions.
 - Use the get_recent_content tool when users ask for the latest videos, articles, or newsletters.
 - Use the browse_web tool when users ask about current events, recent news, or any topic requiring external web content.
+- Use the execute_telegram_command tool when users ask to subscribe/unsubscribe to daily reminders, change language, clear chat memory, or stop studying.
 - Always maintain a polite, respectful tone.
 - Keep answers concise (1-3 sentences max) unless the user asks for details.
 - Do not invent facts about the creator. Use tools to find real information.
@@ -159,7 +178,7 @@ Social Media Links:
     lang_prompt = LANG_PROMPTS.get(lang, LANG_PROMPTS["en"])
     return lang_prompt + "\n" + base
 
-async def execute_tool(tool_name: str, arguments: dict) -> str:
+async def execute_tool(tool_name: str, arguments: dict, user_id: Optional[int] = None) -> str:
     if tool_name == "browse_web":
         url = arguments.get("url", "")
         if not url:
@@ -197,6 +216,30 @@ async def execute_tool(tool_name: str, arguments: dict) -> str:
         else:
             return f"Unknown platform: {platform}"
         return msg or f"No recent {platform} content found."
+    elif tool_name == "execute_telegram_command":
+        if not user_id:
+            return "Cannot execute command: User ID is missing."
+        cmd = arguments.get("command_name", "")
+        from bot.database import subscribe_user, unsubscribe_user, set_reminder_time, set_user_language, set_study_mode
+        from bot.memory import clear_history
+        if cmd == "subscribe":
+            return "User successfully subscribed to daily reminders." if subscribe_user(user_id, "User") else "Failed to subscribe."
+        elif cmd == "unsubscribe":
+            return "User successfully unsubscribed from daily reminders." if unsubscribe_user(user_id) else "Failed to unsubscribe."
+        elif cmd == "remindertime_morning":
+            return "Reminder time set to morning (10 AM)." if set_reminder_time(user_id, "morning") else "Failed to set time."
+        elif cmd == "remindertime_evening":
+            return "Reminder time set to evening (6 PM)." if set_reminder_time(user_id, "evening") else "Failed to set time."
+        elif cmd == "forget":
+            clear_history(user_id)
+            return "Conversation history successfully cleared."
+        elif cmd == "language_en":
+            return "Language successfully set to English." if set_user_language(user_id, "en") else "Failed to set language."
+        elif cmd == "language_bn":
+            return "Language successfully set to Bengali." if set_user_language(user_id, "bn") else "Failed to set language."
+        elif cmd == "stopstudy":
+            return "Study mode disabled successfully." if set_study_mode(user_id, None) else "Failed to exit study mode."
+        return f"Unknown command action: {cmd}"
     return f"Unknown tool: {tool_name}"
 
 import time
@@ -399,7 +442,7 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                     except Exception:
                         args = {}
                     
-                    tool_result = await execute_tool(func_name, args)
+                    tool_result = await execute_tool(func_name, args, user_id=user_id)
                     
                     provider_messages.append({
                         "role": "tool",

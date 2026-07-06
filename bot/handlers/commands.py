@@ -131,7 +131,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/ask - Ask me a question (with memory!)\n"
         "/dua - Search Hisnul Muslim duas\n"
         "/quran - Search Quran verses\n"
+        "/study - Study a specific book\n"
+        "/stopstudy - Stop studying the book\n"
+        "/ingestpdf - Upload a PDF as a book\n"
+        "/subscribe - Get daily Islamic reminders\n"
+        "/unsubscribe - Stop daily reminders\n"
+        "/remindertime - Change reminder time\n"
+        "/myduas - View your bookmarked duas\n"
         "/forget - Clear our conversation history\n"
+        "/language - Set language preference\n"
         "/help - Show all commands"
     )
     await update.message.reply_text(welcome_text, parse_mode="HTML")
@@ -387,8 +395,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/ask - Ask me something (with memory!)\n"
         "/dua - Search Hisnul Muslim duas\n"
         "/quran - Search Quran verses\n"
+        "/study - Study a specific book\n"
+        "/stopstudy - Stop studying the book\n"
+        "/ingestpdf - Upload a PDF as a book\n"
+        "/subscribe - Get daily Islamic reminders\n"
+        "/unsubscribe - Stop daily reminders\n"
+        "/remindertime - Change reminder time\n"
+        "/myduas - View your bookmarked duas\n"
         "/forget - Clear our conversation memory\n"
-        "/language - Set language preference (English/Bengali)\n"
+        "/language - Set language preference\n"
         "/suggest - Suggest a topic\n"
         "/help - This message\n\n"
         "<b>\U0001f4ac Just Ask!</b>\n"
@@ -606,11 +621,6 @@ async def stopstudy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @track_usage("ingestpdf")
 async def ingestpdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from bot.config import is_admin
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("\u26d4 You don't have permission to use this command.")
-        return
-        
     query = clean_command_query(update.message.text, "ingestpdf")
     if not query:
         await update.message.reply_text("Usage: Reply to a PDF document with `/ingestpdf <Book Name>`", parse_mode="Markdown")
