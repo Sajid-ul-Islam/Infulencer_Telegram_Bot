@@ -543,10 +543,13 @@ def get_bookmark_count(user_id: int) -> int:
         logger.error(f"Error counting bookmarks for {user_id}: {e}")
         return 0
 
+_local_study_mode = {}
+
 def set_study_mode(user_id: int, book_name: Optional[str]) -> bool:
     """Sets the study mode for a user. If book_name is None, disables study mode."""
     if not db:
-        return False
+        _local_study_mode[str(user_id)] = book_name
+        return True
     try:
         from google.cloud import firestore as gf
         db.collection("users").document(str(user_id)).set({
@@ -561,7 +564,7 @@ def set_study_mode(user_id: int, book_name: Optional[str]) -> bool:
 def get_study_mode(user_id: int) -> Optional[str]:
     """Gets the active study mode book name for a user."""
     if not db:
-        return None
+        return _local_study_mode.get(str(user_id))
     try:
         doc = db.collection("users").document(str(user_id)).get()
         if doc.exists:
