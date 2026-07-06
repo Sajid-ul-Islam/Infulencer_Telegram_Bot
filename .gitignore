@@ -8,5 +8,5 @@ bot_database.db
 *.db
 
 # Runtime data stores
-documents_store.json
+# (Removed documents_store.json so it can be pushed to Render)
 chroma_db/
