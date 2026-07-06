@@ -243,10 +243,6 @@ def build_application() -> Application:
         first=7200
     )
     job_queue.run_daily(
-        greeting_post, time=datetime.time(8, 0, tzinfo=BOT_TZ),
-        days=(0, 1, 2, 3, 4, 5, 6)
-    )
-    job_queue.run_daily(
         weekly_digest, time=datetime.time(12, 0, tzinfo=BOT_TZ),
         days=(6,)
     )
