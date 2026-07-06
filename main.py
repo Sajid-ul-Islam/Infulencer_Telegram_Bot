@@ -14,7 +14,7 @@ from bot.handlers.commands import (
     start, socials_command, latest, youtube, medium, substack,
     ask_command, dua_command, quran_command, forget_command, ingest_command, help_command,
     subscribe_command, unsubscribe_command, language_command, reminder_time_command, myduas_command,
-    study_command, stopstudy_command, ingestpdf_command
+    study_command, stopstudy_command, ingestdoc_command
 )
 from bot.handlers.admin import (
     postlatest_command, ban_command, mute_command, questions_command,
@@ -169,7 +169,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("language", language_command))
     application.add_handler(CommandHandler("study", study_command))
     application.add_handler(CommandHandler("stopstudy", stopstudy_command))
-    application.add_handler(CommandHandler("ingestpdf", ingestpdf_command))
+    application.add_handler(CommandHandler("ingestdoc", ingestdoc_command))
+    application.add_handler(CommandHandler("ingestpdf", ingestdoc_command)) # Alias for backwards compatibility
     application.add_handler(CommandHandler("ingest", ingest_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("suggest", suggest_command))
@@ -201,8 +202,8 @@ def build_application() -> Application:
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members))
     application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     
-    from bot.handlers.messages import handle_pdf_upload
-    application.add_handler(MessageHandler(filters.Document.PDF, handle_pdf_upload))
+    from bot.handlers.messages import handle_document_upload
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document_upload))
     
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 

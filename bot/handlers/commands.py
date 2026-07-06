@@ -619,28 +619,35 @@ async def stopstudy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("\u274c Failed to exit study mode.")
 
-@track_usage("ingestpdf")
-async def ingestpdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = clean_command_query(update.message.text, "ingestpdf")
+@track_usage("ingestdoc")
+async def ingestdoc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = clean_command_query(update.message.text, "ingestdoc")
     if not query:
-        await update.message.reply_text("Usage: Reply to a PDF document with `/ingestpdf <Book Name>`", parse_mode="Markdown")
+        query = clean_command_query(update.message.text, "ingestpdf")
+    
+    if not query:
+        await update.message.reply_text("Usage: Reply to a document with `/ingestdoc <Book Name>`", parse_mode="Markdown")
         return
         
     if not update.message.reply_to_message or not update.message.reply_to_message.document:
-        await update.message.reply_text("\u26d4 Please reply to a PDF document message to ingest it.")
+        await update.message.reply_text("\u26d4 Please reply to a document message to ingest it.")
         return
         
     doc = update.message.reply_to_message.document
-    if not doc.file_name.lower().endswith(".pdf"):
-        await update.message.reply_text("\u26d4 The replied document must be a PDF file.")
+    
+    import os
+    ext = os.path.splitext(doc.file_name)[1].lower()
+    allowed_exts = ['.pdf', '.docx', '.pptx', '.xlsx', '.csv', '.txt']
+    
+    if ext not in allowed_exts:
+        await update.message.reply_text(f"\u26d4 The replied document must be one of: {', '.join(allowed_exts)}")
         return
         
     status_msg = await update.message.reply_text(f"📥 Downloading '{doc.file_name}'...", parse_mode="HTML")
     
     try:
-        import os
         file = await context.bot.get_file(doc.file_id)
-        temp_path = f"temp_{doc.file_id}.pdf"
+        temp_path = f"temp_{doc.file_id}{ext}"
         await file.download_to_drive(temp_path)
         
         async def progress_cb(msg_text):
@@ -649,8 +656,8 @@ async def ingestpdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
         
-        from bot.pipeline import ingest_pdf
-        chunks_added = await ingest_pdf(temp_path, query, progress_callback=progress_cb)
+        from bot.pipeline import ingest_document
+        chunks_added = await ingest_document(temp_path, query, progress_callback=progress_cb)
         
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -658,8 +665,8 @@ async def ingestpdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if chunks_added > 0:
             await status_msg.edit_text(f"✅ <b>Success!</b>\nIngested {chunks_added} chunks for the book '{query}'. Users can now study it.", parse_mode="HTML")
         else:
-            await status_msg.edit_text(f"❌ Failed to extract text from the PDF. It might be scanned or empty.")
+            await status_msg.edit_text(f"❌ Failed to extract text from the document. It might be scanned or empty.")
             
     except Exception as e:
-        logger.error(f"Error in ingestpdf_command: {e}")
+        logger.error(f"Error in ingestdoc_command: {e}")
         await status_msg.edit_text(f"❌ An error occurred: {str(e)}")

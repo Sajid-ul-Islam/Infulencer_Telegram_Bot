@@ -182,28 +182,71 @@ def get_pipeline_stats() -> dict:
         "quran_count": vectordb.count_by_type("quran"),
     }
 
-async def ingest_pdf(file_path: str, book_name: str, progress_callback=None) -> int:
-    """Extracts text from a PDF and ingests it as a book into the document store."""
+async def ingest_document(file_path: str, book_name: str, progress_callback=None) -> int:
+    """Extracts text from a document and ingests it as a book into the document store."""
     if not _vdb_available:
         return 0
     try:
-        if progress_callback: await progress_callback("⏳ Opening PDF...")
-        import fitz
+        import os
         import re
-        doc = fitz.open(file_path)
+        ext = os.path.splitext(file_path)[1].lower()
         full_text = ""
-        
-        if progress_callback: await progress_callback(f"📖 Extracting text from {len(doc)} pages...")
-        for page in doc:
-            full_text += page.get_text() + "\n"
-        
+        platform_name = ext.replace(".", "").upper()
+
+        if progress_callback: await progress_callback(f"⏳ Opening {platform_name} document...")
+
+        if ext == ".pdf":
+            import fitz
+            doc = fitz.open(file_path)
+            if progress_callback: await progress_callback(f"📖 Extracting text from {len(doc)} pages...")
+            for page in doc:
+                full_text += page.get_text() + "\n"
+
+        elif ext == ".docx":
+            import docx
+            doc = docx.Document(file_path)
+            if progress_callback: await progress_callback(f"📖 Extracting text from {len(doc.paragraphs)} paragraphs...")
+            full_text = "\n".join([para.text for para in doc.paragraphs])
+
+        elif ext == ".pptx":
+            import pptx
+            prs = pptx.Presentation(file_path)
+            if progress_callback: await progress_callback(f"📖 Extracting text from {len(prs.slides)} slides...")
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        full_text += shape.text + "\n"
+
+        elif ext == ".xlsx":
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path, data_only=True)
+            if progress_callback: await progress_callback(f"📖 Extracting text from {len(wb.sheetnames)} sheets...")
+            for sheet in wb:
+                for row in sheet.iter_rows(values_only=True):
+                    row_texts = [str(cell) for cell in row if cell is not None]
+                    if row_texts:
+                        full_text += " | ".join(row_texts) + "\n"
+
+        elif ext == ".csv" or ext == ".txt":
+            if progress_callback: await progress_callback("📖 Reading text file...")
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                full_text = f.read()
+
+        else:
+            logger.error(f"Unsupported document format: {ext}")
+            return 0
+
         full_text = re.sub(r'\n+', '\n', full_text)
         
+        if not full_text.strip():
+            logger.warning(f"No text extracted from {file_path}")
+            return 0
+
         post = {
             "id": f"book_{book_name.replace(' ', '_').lower()}",
             "title": book_name,
             "content": full_text,
-            "platform": "pdf",
+            "platform": platform_name,
             "url": ""
         }
         
@@ -218,7 +261,7 @@ async def ingest_pdf(file_path: str, book_name: str, progress_callback=None) -> 
                 "book_name": book_name,
                 "title": book_name,
                 "content": chunk["content"],
-                "platform": "pdf",
+                "platform": platform_name,
                 "url": ""
             })
             
@@ -231,5 +274,5 @@ async def ingest_pdf(file_path: str, book_name: str, progress_callback=None) -> 
             return len(chunks_to_add)
         return 0
     except Exception as e:
-        logger.error(f"Error ingesting PDF {file_path}: {e}")
+        logger.error(f"Error ingesting document {file_path}: {e}")
         return 0
