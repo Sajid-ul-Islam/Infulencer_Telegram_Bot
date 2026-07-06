@@ -15,19 +15,44 @@ last_posted_facebook_url = None
 last_posted_twitter_url = None
 
 async def send_channel_message(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
+    # 1. Send to Channel
     if not CHANNEL_ID:
         logger.warning("CHANNEL_ID not set. Skipping channel broadcast.")
-        return
+    else:
+        try:
+            await context.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=text,
+                parse_mode="HTML",
+                reply_markup=reply_markup
+            )
+            logger.info(f"Message sent to channel: {text[:50]}")
+        except Exception as e:
+            logger.error(f"Error sending to channel: {e}")
+            
+    # 2. Send to all subscribed users
     try:
-        await context.bot.send_message(
-            chat_id=CHANNEL_ID,
-            text=text,
-            parse_mode="HTML",
-            reply_markup=reply_markup
-        )
-        logger.info(f"Message sent to channel: {text[:50]}")
+        from bot.database import get_subscribed_users
+        users = get_subscribed_users()
+        if users:
+            logger.info(f"Broadcasting to {len(users)} subscribed users...")
+            sent_count = 0
+            for user_id in users:
+                try:
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=text,
+                        parse_mode="HTML",
+                        reply_markup=reply_markup
+                    )
+                    sent_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to send to user {user_id}: {e}")
+                # Rate limiting delay to avoid Telegram block
+                await asyncio.sleep(0.05)
+            logger.info(f"Broadcast completed. Sent to {sent_count}/{len(users)} users.")
     except Exception as e:
-        logger.error(f"Error sending to channel: {e}")
+        logger.error(f"Error in inbox broadcast: {e}")
 
 async def auto_post_youtube(context: ContextTypes.DEFAULT_TYPE):
     global last_posted_youtube_url
@@ -325,7 +350,7 @@ async def evening_islamic_reminder(context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in evening_islamic_reminder: {e}")
 
 
-recently_posted_urls = []
+recently_posted_urls = {}
 
 async def scheduled_content_hub_post(context: ContextTypes.DEFAULT_TYPE):
     """Periodically posts latest or random content from YouTube, Medium, or Substack every 2 hours."""
@@ -334,8 +359,13 @@ async def scheduled_content_hub_post(context: ContextTypes.DEFAULT_TYPE):
     import random
     import feedparser
     import html
+    import datetime
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from bot.config import YOUTUBE_CHANNEL_ID, MEDIUM_USERNAME, SUBSTACK_URL, YOUTUBE_LINK, MEDIUM_LINK, FACEBOOK_LINK, FACEBOOK_RSS_URL, TWITTER_LINK, TWITTER_RSS_URL
+    
+    # Clean up urls older than 24 hours
+    now = datetime.datetime.now()
+    recently_posted_urls = {k: v for k, v in recently_posted_urls.items() if (now - v).total_seconds() < 86400}
     
     # Select random platform
     platforms = ["youtube", "medium", "substack"]
@@ -388,19 +418,18 @@ async def scheduled_content_hub_post(context: ContextTypes.DEFAULT_TYPE):
             if not feed.entries:
                 continue
                 
+            # Filter out entries already posted in the last 24h
+            available_entries = [e for e in feed.entries if e.link not in recently_posted_urls]
+            if not available_entries:
+                continue
+                
             # Choose mode: latest (70% weight) or random from feed (30% weight)
             mode = random.choices(["latest", "random"], weights=[0.7, 0.3], k=1)[0]
             
-            selected_entry = None
             if mode == "latest":
-                selected_entry = feed.entries[0]
+                selected_entry = available_entries[0]
             else:
-                # Try to find a random entry not recently posted
-                available_entries = [e for e in feed.entries if e.link not in recently_posted_urls]
-                if available_entries:
-                    selected_entry = random.choice(available_entries)
-                else:
-                    selected_entry = feed.entries[0]
+                selected_entry = random.choice(available_entries)
                     
             if not selected_entry:
                 continue
@@ -433,9 +462,7 @@ async def scheduled_content_hub_post(context: ContextTypes.DEFAULT_TYPE):
             await send_channel_message(context, message, reply_markup=keyboard)
             
             # Add to recently posted tracking
-            recently_posted_urls.append(link)
-            if len(recently_posted_urls) > 15:
-                recently_posted_urls.pop(0)
+            recently_posted_urls[link] = datetime.datetime.now()
                 
             # If it was youtube, trigger transcription/ingest
             if platform == "youtube":

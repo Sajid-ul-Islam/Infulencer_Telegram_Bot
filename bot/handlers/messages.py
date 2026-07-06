@@ -87,7 +87,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not response:
             response = get_faq_response(cleaned_query)
             if not response:
-                response = "Walaikum Assalam! 😊 How can I help you today? Type /help to see what I can do."
+                response = "I'm sorry, I am currently unable to process your request. Please try again later."
         else:
             keyboard = InlineKeyboardMarkup([
                 [

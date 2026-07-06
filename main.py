@@ -199,25 +199,30 @@ def build_application() -> Application:
         evening_islamic_reminder, time=datetime.time(18, 0, tzinfo=BOT_TZ),
         days=(0, 1, 2, 3, 4, 5, 6)
     )
-    job_queue.run_daily(
-        auto_post_youtube, time=datetime.time(9, 0, tzinfo=BOT_TZ),
-        days=(0, 1, 2, 3, 4, 5, 6)
+    job_queue.run_repeating(
+        auto_post_youtube,
+        interval=7200,
+        first=20
     )
-    job_queue.run_daily(
-        auto_post_medium, time=datetime.time(18, 0, tzinfo=BOT_TZ),
-        days=(0, 1, 2, 3, 4, 5, 6)
+    job_queue.run_repeating(
+        auto_post_medium,
+        interval=7200,
+        first=50
     )
-    job_queue.run_daily(
-        auto_post_substack, time=datetime.time(14, 0, tzinfo=BOT_TZ),
-        days=(0, 1, 2, 3, 4, 5, 6)
+    job_queue.run_repeating(
+        auto_post_substack,
+        interval=7200,
+        first=60
     )
-    job_queue.run_daily(
-        auto_post_facebook, time=datetime.time(16, 0, tzinfo=BOT_TZ),
-        days=(0, 1, 2, 3, 4, 5, 6)
+    job_queue.run_repeating(
+        auto_post_facebook,
+        interval=7200,
+        first=40
     )
-    job_queue.run_daily(
-        auto_post_twitter, time=datetime.time(20, 0, tzinfo=BOT_TZ),
-        days=(0, 1, 2, 3, 4, 5, 6)
+    job_queue.run_repeating(
+        auto_post_twitter,
+        interval=7200,
+        first=30
     )
     job_queue.run_daily(
         greeting_post, time=datetime.time(8, 0, tzinfo=BOT_TZ),

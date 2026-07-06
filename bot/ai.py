@@ -450,8 +450,6 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
 
 def get_faq_response(user_message: str) -> Optional[str]:
     user_message_lower = user_message.lower()
-    if any(word in user_message_lower for word in ["salam", "assalam", "salam alaikum"]):
-        return "Walikumus Salam! 😊\nHow can I help you today? Type /help to see what I can do."
     for keyword, response in FAQ.items():
         if keyword in user_message_lower:
             return response
