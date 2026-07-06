@@ -211,6 +211,23 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             )
         return
 
+    # ── Study Book ──────────────────────────────────────────────
+    if data.startswith("studybook:"):
+        book_name = data.split(":", 1)[1]
+        from bot.database import set_study_mode
+        success = set_study_mode(user_id, book_name)
+        if success:
+            await query.answer(f"Study mode active for '{book_name}'")
+            await query.edit_message_text(
+                f"\U0001f4da <b>Study mode enabled: {book_name}</b>\n\n"
+                f"You are now studying this book. Any questions you ask will be answered using its content. "
+                f"Send /stopstudy when you are done.",
+                parse_mode="HTML"
+            )
+        else:
+            await query.answer("Failed to set study mode.", show_alert=True)
+        return
+
     # ── Giveaway entry ─────────────────────────────────────────
     if data == "enter_giveaway":
         if not db:

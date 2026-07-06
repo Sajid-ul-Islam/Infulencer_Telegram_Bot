@@ -181,3 +181,50 @@ def get_pipeline_stats() -> dict:
         "dua_count": vectordb.count_by_type("dua"),
         "quran_count": vectordb.count_by_type("quran"),
     }
+
+async def ingest_pdf(file_path: str, book_name: str) -> int:
+    """Extracts text from a PDF and ingests it as a book into the document store."""
+    if not _vdb_available:
+        return 0
+    try:
+        import fitz
+        import re
+        doc = fitz.open(file_path)
+        full_text = ""
+        for page in doc:
+            full_text += page.get_text() + "\n"
+        
+        full_text = re.sub(r'\n+', '\n', full_text)
+        
+        post = {
+            "id": f"book_{book_name.replace(' ', '_').lower()}",
+            "title": book_name,
+            "content": full_text,
+            "platform": "pdf",
+            "url": ""
+        }
+        
+        chunks = chunk_document(post, chunk_size=800, chunk_overlap=150)
+        
+        chunks_to_add = []
+        for i, chunk in enumerate(chunks):
+            chunks_to_add.append({
+                "id": f"book_{book_name.replace(' ', '_').lower()}_{i}",
+                "type": "book",
+                "book_name": book_name,
+                "title": book_name,
+                "content": chunk["content"],
+                "platform": "pdf",
+                "url": ""
+            })
+            
+        if chunks_to_add:
+            from bot import vectordb
+            vectordb.add_documents(chunks_to_add)
+            rebuild_bm25_index()
+            logger.info(f"Ingested {len(chunks_to_add)} chunks for book: {book_name}")
+            return len(chunks_to_add)
+        return 0
+    except Exception as e:
+        logger.error(f"Error ingesting PDF {file_path}: {e}")
+        return 0

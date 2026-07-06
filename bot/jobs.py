@@ -14,6 +14,18 @@ last_posted_substack_url = None
 last_posted_facebook_url = None
 last_posted_twitter_url = None
 
+post_queue = []
+
+def queue_channel_message(text: str, reply_markup=None):
+    post_queue.append({"text": text, "reply_markup": reply_markup})
+    logger.info(f"Queued message for channel. Queue size: {len(post_queue)}")
+
+async def process_post_queue(context: ContextTypes.DEFAULT_TYPE):
+    if post_queue:
+        post = post_queue.pop(0)
+        logger.info(f"Processing queued post. Remaining: {len(post_queue)}")
+        await send_channel_message(context, post["text"], reply_markup=post["reply_markup"])
+
 async def send_channel_message(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
     # 1. Send to Channel
     if not CHANNEL_ID:
@@ -60,7 +72,7 @@ async def auto_post_youtube(context: ContextTypes.DEFAULT_TYPE):
         yt_msg, yt_btn, link = await get_youtube_posts(limit=1)
         if yt_msg and link and link != last_posted_youtube_url:
             reply_markup = InlineKeyboardMarkup([[yt_btn]]) if yt_btn else None
-            await send_channel_message(context, yt_msg, reply_markup=reply_markup)
+            queue_channel_message(yt_msg, reply_markup=reply_markup)
             last_posted_youtube_url = link
             asyncio.create_task(_transcribe_and_ingest(link, context))
         await ingest_rss_content()
@@ -105,7 +117,7 @@ async def auto_post_medium(context: ContextTypes.DEFAULT_TYPE):
         med_msg, med_btn, link = await get_medium_posts(limit=1)
         if med_msg and link and link != last_posted_medium_url:
             reply_markup = InlineKeyboardMarkup([[med_btn]]) if med_btn else None
-            await send_channel_message(context, med_msg, reply_markup=reply_markup)
+            queue_channel_message(med_msg, reply_markup=reply_markup)
             last_posted_medium_url = link
         await ingest_rss_content()
     except Exception as e:
@@ -117,7 +129,7 @@ async def auto_post_substack(context: ContextTypes.DEFAULT_TYPE):
         sub_msg, sub_btn, link = await get_substack_posts(limit=1)
         if sub_msg and link and link != last_posted_substack_url:
             reply_markup = InlineKeyboardMarkup([[sub_btn]]) if sub_btn else None
-            await send_channel_message(context, sub_msg, reply_markup=reply_markup)
+            queue_channel_message(sub_msg, reply_markup=reply_markup)
             last_posted_substack_url = link
         await ingest_rss_content()
     except Exception as e:
@@ -129,7 +141,7 @@ async def auto_post_facebook(context: ContextTypes.DEFAULT_TYPE):
         fb_msg, fb_btn, link = await get_facebook_posts(limit=1)
         if fb_msg and link and link != last_posted_facebook_url:
             reply_markup = InlineKeyboardMarkup([[fb_btn]]) if fb_btn else None
-            await send_channel_message(context, fb_msg, reply_markup=reply_markup)
+            queue_channel_message(fb_msg, reply_markup=reply_markup)
             last_posted_facebook_url = link
         await ingest_rss_content()
     except Exception as e:
@@ -141,7 +153,7 @@ async def auto_post_twitter(context: ContextTypes.DEFAULT_TYPE):
         tw_msg, tw_btn, link = await get_twitter_posts(limit=1)
         if tw_msg and link and link != last_posted_twitter_url:
             reply_markup = InlineKeyboardMarkup([[tw_btn]]) if tw_btn else None
-            await send_channel_message(context, tw_msg, reply_markup=reply_markup)
+            queue_channel_message(tw_msg, reply_markup=reply_markup)
             last_posted_twitter_url = link
         await ingest_rss_content()
     except Exception as e:
@@ -459,7 +471,7 @@ async def scheduled_content_hub_post(context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton(btn_text, url=link)]
             ])
             
-            await send_channel_message(context, message, reply_markup=keyboard)
+            queue_channel_message(message, reply_markup=keyboard)
             
             # Add to recently posted tracking
             recently_posted_urls[link] = datetime.datetime.now()

@@ -284,12 +284,23 @@ async def summarize_history(history: list) -> str:
 
 async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_memory: bool = True) -> Optional[str]:
     from bot.vectordb import get_cached_response, cache_response
-    from bot.database import get_user_language
+    from bot.database import get_user_language, get_study_mode
     
     pref_lang = get_user_language(user_id) if user_id else None
     lang = pref_lang or _detect_lang(user_message)
     
-    system_prompt = get_system_prompt(user_id, lang=lang).strip()
+    study_book = get_study_mode(user_id) if user_id else None
+    if study_book:
+        from bot.search import search_book
+        book_context = search_book(user_message, study_book, n_results=4)
+        system_prompt = (
+            f"You are an AI study assistant. The user is currently studying the book '{study_book}'.\n"
+            f"Use the following excerpts from the book to answer the user's question accurately.\n"
+            f"Even if the excerpts are in a different language (like Arabic), you MUST reply and converse with the user in their language (or the language of their prompt).\n\n"
+            f"Book Excerpts:\n{book_context}"
+        )
+    else:
+        system_prompt = get_system_prompt(user_id, lang=lang).strip()
     
     history = []
     if use_memory and user_id:

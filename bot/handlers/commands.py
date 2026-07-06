@@ -572,3 +572,78 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
         reply_markup=keyboard,
     )
+
+
+@track_usage("study")
+async def study_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from bot.vectordb import get_available_books
+    books = get_available_books()
+    if not books:
+        await update.message.reply_text("\u26d4 No books are currently available for study. Admin needs to upload some using /ingestpdf.")
+        return
+        
+    buttons = []
+    for book in books:
+        buttons.append([InlineKeyboardButton(book, callback_data=f"studybook:{book}")])
+    
+    keyboard = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text(
+        "\U0001f4da <b>Select a book to study:</b>\n"
+        "Once selected, your chat will be focused entirely on this book.",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+@track_usage("stopstudy")
+async def stopstudy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from bot.database import set_study_mode
+    user_id = update.effective_user.id
+    success = set_study_mode(user_id, None)
+    if success:
+        await update.message.reply_text("\u2705 <b>Study mode disabled.</b>\nI am back to my normal conversation mode.", parse_mode="HTML")
+    else:
+        await update.message.reply_text("\u274c Failed to exit study mode.")
+
+@track_usage("ingestpdf")
+async def ingestpdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from bot.config import is_admin
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("\u26d4 You don't have permission to use this command.")
+        return
+        
+    query = clean_command_query(update.message.text, "ingestpdf")
+    if not query:
+        await update.message.reply_text("Usage: Reply to a PDF document with `/ingestpdf <Book Name>`", parse_mode="Markdown")
+        return
+        
+    if not update.message.reply_to_message or not update.message.reply_to_message.document:
+        await update.message.reply_text("\u26d4 Please reply to a PDF document message to ingest it.")
+        return
+        
+    doc = update.message.reply_to_message.document
+    if not doc.file_name.lower().endswith(".pdf"):
+        await update.message.reply_text("\u26d4 The replied document must be a PDF file.")
+        return
+        
+    await update.message.reply_text(f"\U0001f504 Downloading and extracting text from '{doc.file_name}' as book: <b>{query}</b>...", parse_mode="HTML")
+    
+    try:
+        import os
+        file = await context.bot.get_file(doc.file_id)
+        temp_path = f"temp_{doc.file_id}.pdf"
+        await file.download_to_drive(temp_path)
+        
+        from bot.pipeline import ingest_pdf
+        chunks_added = await ingest_pdf(temp_path, query)
+        
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+            
+        if chunks_added > 0:
+            await update.message.reply_text(f"\u2705 <b>Success!</b>\nIngested {chunks_added} chunks for the book '{query}'. Users can now study it.", parse_mode="HTML")
+        else:
+            await update.message.reply_text(f"\u274c Failed to extract text from the PDF. It might be scanned or empty.")
+            
+    except Exception as e:
+        logger.error(f"Error in ingestpdf_command: {e}")
+        await update.message.reply_text(f"\u274c An error occurred: {str(e)}")

@@ -542,3 +542,31 @@ def get_bookmark_count(user_id: int) -> int:
     except Exception as e:
         logger.error(f"Error counting bookmarks for {user_id}: {e}")
         return 0
+
+def set_study_mode(user_id: int, book_name: Optional[str]) -> bool:
+    """Sets the study mode for a user. If book_name is None, disables study mode."""
+    if not db:
+        return False
+    try:
+        from google.cloud import firestore as gf
+        db.collection("users").document(str(user_id)).set({
+            "study_mode": book_name,
+            "last_active": gf.SERVER_TIMESTAMP
+        }, merge=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error setting study mode for {user_id}: {e}")
+        return False
+
+def get_study_mode(user_id: int) -> Optional[str]:
+    """Gets the active study mode book name for a user."""
+    if not db:
+        return None
+    try:
+        doc = db.collection("users").document(str(user_id)).get()
+        if doc.exists:
+            return doc.to_dict().get("study_mode")
+        return None
+    except Exception as e:
+        logger.error(f"Error getting study mode for {user_id}: {e}")
+        return None

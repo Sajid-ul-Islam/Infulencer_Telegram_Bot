@@ -8,12 +8,13 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ, ADMIN_ID, RENDER_EXTERNAL_URL, WEBHOOK_URL, validate_ai_keys
 from bot.database import load_faqs
 from bot.server import ping_self
-from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, auto_post_facebook, auto_post_twitter, greeting_post, weekly_digest, daily_islamic_reminder, evening_islamic_reminder, scheduled_content_hub_post
+from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, auto_post_facebook, auto_post_twitter, greeting_post, weekly_digest, daily_islamic_reminder, evening_islamic_reminder, scheduled_content_hub_post, process_post_queue
 from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses
 from bot.handlers.commands import (
     start, socials_command, latest, youtube, medium, substack,
     ask_command, dua_command, quran_command, forget_command, ingest_command, help_command,
-    subscribe_command, unsubscribe_command, language_command, reminder_time_command, myduas_command
+    subscribe_command, unsubscribe_command, language_command, reminder_time_command, myduas_command,
+    study_command, stopstudy_command, ingestpdf_command
 )
 from bot.handlers.admin import (
     postlatest_command, ban_command, mute_command, questions_command,
@@ -157,6 +158,9 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("quran", quran_command))
     application.add_handler(CommandHandler("forget", forget_command))
     application.add_handler(CommandHandler("language", language_command))
+    application.add_handler(CommandHandler("study", study_command))
+    application.add_handler(CommandHandler("stopstudy", stopstudy_command))
+    application.add_handler(CommandHandler("ingestpdf", ingestpdf_command))
     application.add_handler(CommandHandler("ingest", ingest_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("suggest", suggest_command))
@@ -233,11 +237,17 @@ def build_application() -> Application:
         days=(6,)
     )
 
-    # Repeating job for the content hub poster (runs every 2 hours)
     job_queue.run_repeating(
         scheduled_content_hub_post,
         interval=7200,
         first=10
+    )
+
+    # Queue processor runs every 15 minutes (900 seconds)
+    job_queue.run_repeating(
+        process_post_queue,
+        interval=900,
+        first=60
     )
 
     return application

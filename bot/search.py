@@ -301,3 +301,15 @@ def get_surah_verses(surah_no: int, page: int = 1, limit: int = 5) -> tuple[str,
     except Exception as e:
         logger.error(f"Error fetching surah verses: {e}")
         return "An error occurred fetching verses.", [], False, False
+
+def search_book(query: str, book_name: str, n_results: int = 3, use_rerank: bool = False) -> str:
+    """Executes search pipeline scoped for a specific book."""
+    hits = hybrid_search(query, n_results=n_results, alpha=0.5, where={"type": "book", "book_name": book_name})
+    if not hits:
+        return "No relevant information found in the book for this query."
+    if use_rerank and len(hits) > 1:
+        hits = rerank(query, hits, top_n=min(3, len(hits)))
+    formatted = []
+    for hit in hits:
+        formatted.append(f"Excerpt:\n{hit['text']}")
+    return "\n\n---\n\n".join(formatted)

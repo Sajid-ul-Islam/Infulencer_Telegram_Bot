@@ -130,6 +130,15 @@ class InMemoryDocStore:
         self._documents.clear()
         self._save_to_disk()
 
+    def get_available_books(self) -> List[str]:
+        books = set()
+        for d in self._documents:
+            if d["metadata"].get("type") == "book":
+                book_name = d["metadata"].get("book_name")
+                if book_name:
+                    books.add(book_name)
+        return sorted(list(books))
+
     def build_bm25_corpus(self) -> Tuple[List[str], List[Dict[str, Any]]]:
         texts = [d["text"] for d in self._documents]
         metadatas = [d["metadata"] for d in self._documents]
@@ -232,6 +241,10 @@ def delete_document(post_id: str) -> None:
 
 def reset_collection() -> None:
     _doc_store.reset_collection()
+
+
+def get_available_books() -> list:
+    return _doc_store.get_available_books()
 
 
 def delete_by_id_prefix(prefix: str) -> int:
