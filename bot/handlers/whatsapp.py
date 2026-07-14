@@ -11,6 +11,7 @@ Mirrors ALL Telegram bot features for WhatsApp:
 """
 import asyncio
 import datetime
+import time
 from typing import Optional
 
 from bot.config import (
@@ -23,7 +24,7 @@ from bot.database import (
     set_reminder_time, get_reminder_time, set_user_language, get_user_language,
     set_study_mode, get_study_mode,
     save_bookmark, remove_bookmark, get_user_bookmarks, get_bookmark_count, is_bookmarked,
-    get_feedback_counts,
+    save_feedback, get_feedback_counts,
 )
 from bot.ai import get_ai_response
 from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts
@@ -85,6 +86,13 @@ def _clear_session(sender_id: str):
     _user_sessions.pop(sid, None)
 
 
+# ── New user tracking (for welcome message) ───────────────────
+_welcomed_users: set = set()  # In-memory set of users who have received the welcome message
+
+# ── Feedback tracking ─────────────────────────────────────────
+_feedback_messages: dict = {}  # {feedback_id: {"user_id": int, "username": str, "text": str}}
+
+
 # ── Main entry point ────────────────────────────────────────────
 
 async def handle_whatsapp_message(
@@ -101,9 +109,42 @@ async def handle_whatsapp_message(
     if message_id:
         asyncio.create_task(send_read_receipt(phone_number_id, message_id))
 
+    # Cleanup stale feedback entries (older than 1 hour)
+    now = time.time()
+    stale_keys = [k for k, v in _feedback_messages.items() if now - v.get("created_at", 0) > 3600]
+    for k in stale_keys:
+        _feedback_messages.pop(k, None)
+
     # Normalize input
     raw = text.strip()
     lower = raw.lower()
+
+    # ── First-time welcome message ──
+    user_id = _to_user_id(sender_id)
+    if user_id and user_id not in _welcomed_users:
+        _welcomed_users.add(user_id)
+        track_activity(user_id, sender_id, "whatsapp_first_visit")
+        welcome_text = (
+            "👋 *Assalamu Alaikum and Welcome to Bearded Bangali!*\n\n"
+            "🎉 I'm your AI assistant on WhatsApp! Here's what I can do:\n\n"
+            "📱 *Content & Socials*\n"
+            "• *latest* — View all latest posts\n"
+            "• *youtube* — Latest videos\n"
+            "• *medium* — Latest articles\n"
+            "• *substack* — Latest newsletters\n"
+            "• *socials* — All platform links\n\n"
+            "🤲 *Islamic Features*\n"
+            "• *dua <search>* — Search Hisnul Muslim duas\n"
+            "• *quran <search>* — Search & read Quran\n"
+            "• *myduas* — View your bookmarks\n\n"
+            "🤖 *AI Assistant*\n"
+            "• Just type any question to chat with me!\n"
+            "• *ask <question>* — Ask the AI directly\n\n"
+            "🔔 *Daily Reminders*\n"
+            "• *subscribe* — Get daily Islamic reminders\n\n"
+            "💡 *Tip:* Type *help* anytime to see the full menu!"
+        )
+        await send_whatsapp_message(phone_number_id, sender_id, welcome_text)
 
     # ── Session-based continuation (list row selections, button replies) ──
     session = _get_session(sender_id)
@@ -873,6 +914,19 @@ async def _cmd_ask(phone_number_id: str, sender_id: str, query: str):
     clean = strip_html(response)
     await send_whatsapp_message(phone_number_id, sender_id, clean)
 
+    # Send feedback buttons (👍/👎) after AI response
+    feedback_id = f"{sender_id}_{int(time.time() * 1000)}"
+    _feedback_messages[feedback_id] = {"user_id": user_id, "username": sender_id, "text": clean, "created_at": time.time()}
+    await send_reply_buttons(
+        phone_number_id, sender_id,
+        "Was this response helpful?",
+        [
+            build_button_reply(f"fb_pos_{feedback_id}", "👍 Helpful"),
+            build_button_reply(f"fb_neg_{feedback_id}", "👎 Not helpful"),
+        ],
+        footer_text="Your feedback helps me improve!",
+    )
+
 
 async def _cmd_forget(phone_number_id: str, sender_id: str):
     """Clear conversation history."""
@@ -1264,6 +1318,29 @@ async def handle_interactive_reply(
     if reply_id == "back_bm":
         _clear_session(sender_id)
         await _cmd_myduas(phone_number_id, sender_id)
+        return
+
+    # ── Feedback (thumbs up/down) ──
+    if reply_id.startswith("fb_pos_") or reply_id.startswith("fb_neg_"):
+        feedback_id = reply_id[7:]  # Remove "fb_pos_" or "fb_neg_"
+        feedback_type = "positive" if reply_id.startswith("fb_pos_") else "negative"
+        fb_data = _feedback_messages.get(feedback_id)
+        if fb_data:
+            save_feedback(
+                fb_data["user_id"],
+                fb_data["username"],
+                feedback_type,
+                0,  # WhatsApp has no message_id in the same sense
+                fb_data["text"][:500],
+            )
+            if feedback_type == "positive":
+                await send_whatsapp_message(phone_number_id, sender_id, "Thanks for the feedback! 👍")
+            else:
+                await send_whatsapp_message(phone_number_id, sender_id, "Sorry about that! I'll improve. 👎")
+            # Remove from tracking
+            _feedback_messages.pop(feedback_id, None)
+        else:
+            await send_whatsapp_message(phone_number_id, sender_id, "Thanks for the feedback! 👍")
         return
 
     # ── Fallback: treat as text command ──
