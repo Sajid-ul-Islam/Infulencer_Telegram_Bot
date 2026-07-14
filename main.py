@@ -351,8 +351,10 @@ async def async_main():
 
 
 def main():
-    # Validate AI provider keys immediately so diagnostics appear first in logs
+    # Validate AI provider keys and WhatsApp credentials immediately so diagnostics appear first in logs
     validate_ai_keys()
+    from bot.config import validate_whatsapp_keys
+    validate_whatsapp_keys()
     asyncio.run(async_main())
 
 

@@ -24,8 +24,10 @@ async def handle_meta_webhook_payload(payload: Dict[Any, Any]):
     object_type = payload.get("object")
 
     if object_type == "whatsapp_business_account":
+        logger.info(f"WhatsApp webhook received — entries={len(payload.get('entry', []))}")
         await _process_whatsapp(payload)
     elif object_type in ["page", "instagram"]:
+        logger.info(f"Messenger/Instagram webhook received")
         await _process_messenger(payload)
     else:
         logger.info(f"Unknown Meta webhook object: {object_type}")
@@ -37,11 +39,19 @@ async def _process_whatsapp(payload: dict):
     Routes to the comprehensive WhatsApp handler which mirrors all Telegram features.
     """
     for entry in payload.get("entry", []):
+        entry_id = entry.get("id", "unknown")
         for change in entry.get("changes", []):
             value = change.get("value", {})
 
+            # Check if this is a message or status update
             if "messages" in value:
                 phone_number_id = value.get("metadata", {}).get("phone_number_id")
+                logger.debug(f"WhatsApp messages for phone_number_id={phone_number_id} — count={len(value['messages'])}")
+
+                # Validate phone_number_id
+                if not phone_number_id:
+                    logger.error(f"Missing phone_number_id in webhook payload — Meta may have changed the payload format")
+                    continue
 
                 for message in value.get("messages", []):
                     sender_id = message.get("from")

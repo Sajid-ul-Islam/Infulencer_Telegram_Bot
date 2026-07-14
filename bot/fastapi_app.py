@@ -101,10 +101,23 @@ async def receive_meta_webhook(request: Request):
     from bot.handlers.meta import handle_meta_webhook_payload
     try:
         payload = await request.json()
-        logger.info("Received Meta Webhook")
+        # Log webhook receipt with minimal info (don't log full payload to avoid PII leaks)
+        object_type = payload.get("object", "unknown")
+        entries = len(payload.get("entry", []))
+        logger.info(f"Meta webhook POST received — object={object_type}, entries={entries}")
+        
+        # Quick sanity check: WhatsApp webhooks should have 'entry' list
+        if not payload.get("entry"):
+            logger.warning(f"Meta webhook payload has no 'entry' list — ignoring")
+            return Response(content="EVENT_RECEIVED", status_code=200)
+            
         # Run in background to acknowledge Meta quickly (they require a 200 OK within 20 seconds)
         asyncio.create_task(handle_meta_webhook_payload(payload))
         return Response(content="EVENT_RECEIVED", status_code=200)
+    except json.JSONDecodeError:
+        raw_body = await request.body()
+        logger.error(f"Meta webhook received non-JSON body: {raw_body[:200]}")
+        return Response(status_code=400)
     except Exception as e:
         logger.error(f"Error handling Meta webhook: {e}")
         return Response(status_code=404)

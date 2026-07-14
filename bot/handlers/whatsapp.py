@@ -209,15 +209,15 @@ async def handle_whatsapp_message(
     # ── AI commands ──
     if cmd_text.startswith("ask ") or cmd_text.startswith("ask:"):
         query = raw[4:].strip()
-        await _cmd_ask(phone_number_id, sender_id, query)
+        await _cmd_ask(phone_number_id, sender_id, query, message_id)
         return
     if cmd_text.startswith("ai ") or cmd_text.startswith("ai:"):
         query = raw[3:].strip()
-        await _cmd_ask(phone_number_id, sender_id, query)
+        await _cmd_ask(phone_number_id, sender_id, query, message_id)
         return
     if cmd_text.startswith("?"):
         query = raw[1:].strip()
-        await _cmd_ask(phone_number_id, sender_id, query)
+        await _cmd_ask(phone_number_id, sender_id, query, message_id)
         return
 
     # ── User preferences ──
@@ -272,7 +272,7 @@ async def handle_whatsapp_message(
 
     # ── Fallback: AI chat ──
     # If it's just text, treat it as an AI query
-    await _cmd_ask(phone_number_id, sender_id, raw)
+    await _cmd_ask(phone_number_id, sender_id, raw, message_id)
 
 
 # ── Session continuation handler ────────────────────────────────
@@ -885,7 +885,7 @@ async def _show_bookmark_detail(phone_number_id: str, sender_id: str, bm: dict):
 #  AI ASSISTANT
 # ═══════════════════════════════════════════════════════════════
 
-async def _cmd_ask(phone_number_id: str, sender_id: str, query: str):
+async def _cmd_ask(phone_number_id: str, sender_id: str, query: str, message_id: str = None):
     """Send query to AI and return response."""
     if not query:
         await send_whatsapp_message(phone_number_id, sender_id,
@@ -902,7 +902,8 @@ async def _cmd_ask(phone_number_id: str, sender_id: str, query: str):
     track_activity(_to_user_id(sender_id) or 0, sender_id, "whatsapp_ask")
 
     # Show typing indicator via sending a reaction
-    asyncio.create_task(send_reaction(phone_number_id, sender_id, "", "🤔"))
+    if message_id:
+        asyncio.create_task(send_reaction(phone_number_id, sender_id, message_id, "🤔"))
 
     user_id = _to_user_id(sender_id)
 

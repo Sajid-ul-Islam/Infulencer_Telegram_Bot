@@ -34,6 +34,7 @@ DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "admin")
 
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN")
 META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "my_secret_verify_token")
+WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
 
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")  # Explicit webhook URL; falls back to RENDER_EXTERNAL_URL + /webhook
@@ -112,6 +113,33 @@ def validate_ai_keys():
         logger.error(
             "🚫 NO AI providers configured! The /ask command will NOT work. "
             "Set at least OPENROUTER_API_KEY or GROQ_API_KEY in your environment."
+        )
+
+
+def validate_whatsapp_keys():
+    """Validate WhatsApp/Meta API credentials at startup."""
+    if _is_valid_key(META_ACCESS_TOKEN):
+        logger.info("✅ META_ACCESS_TOKEN configured — WhatsApp bot ready")
+    else:
+        logger.error(
+            "🚫 META_ACCESS_TOKEN is NOT configured! WhatsApp bot will NOT send any messages. "
+            "Set this environment variable in your Render dashboard. "
+            "Get a long-lived token from: https://developers.facebook.com/apps/"
+        )
+    if _is_valid_key(META_VERIFY_TOKEN) and META_VERIFY_TOKEN != "my_secret_verify_token":
+        logger.info("✅ META_VERIFY_TOKEN configured — webhook verification ready")
+    else:
+        logger.warning(
+            "⚠️ META_VERIFY_TOKEN is using default value! "
+            "Set a custom verify token in your Meta Developer webhook settings for security."
+        )
+    if WHATSAPP_PHONE_NUMBER_ID:
+        logger.info(f"✅ WHATSAPP_PHONE_NUMBER_ID configured — using phone ID: {WHATSAPP_PHONE_NUMBER_ID}")
+    else:
+        logger.warning(
+            "⚠️ WHATSAPP_PHONE_NUMBER_ID is not set! "
+            "Proactive messages (like daily reminders) will not work without it. "
+            "However, webhook-triggered messages will still use the phone_number_id from the payload."
         )
 
 
