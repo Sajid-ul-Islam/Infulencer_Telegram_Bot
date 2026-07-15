@@ -7,7 +7,7 @@ from telegram import Update, BotCommand, BotCommandScopeDefault, BotCommandScope
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, InlineQueryHandler
 from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ, ADMIN_ID, RENDER_EXTERNAL_URL, WEBHOOK_URL, validate_ai_keys
 from bot.database import load_faqs
-from bot.server import ping_self
+from bot.utils import ping_self
 from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, auto_post_facebook, auto_post_twitter, greeting_post, weekly_digest, daily_islamic_reminder, evening_islamic_reminder, scheduled_content_hub_post, process_post_queue
 from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses
 from bot.handlers.commands import (

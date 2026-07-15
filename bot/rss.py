@@ -218,3 +218,82 @@ async def get_twitter_posts(limit=3, return_url_only=False, random_old=False):
     
     if return_url_only: return None
     return None, None, None
+
+
+async def check_and_sync_rss_manually():
+    """Manually fetches latest YouTube, Medium, and Substack entries and broadcasts to channel if new."""
+    import bot.jobs
+    from bot.config import TELEGRAM_TOKEN, CHANNEL_ID
+    
+    async def send_tg_message(text, reply_markup=None):
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": CHANNEL_ID, "text": text, "parse_mode": "HTML"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.post(url, json=payload)
+            return res.status_code == 200
+
+    posts_sent = 0
+
+    # Sync YouTube
+    try:
+        yt_msg, yt_btn, link = await get_youtube_posts(limit=1)
+        if yt_msg and link and link != bot.jobs.last_posted_youtube_url:
+            reply_markup = {"inline_keyboard": [[{"text": yt_btn.text, "url": yt_btn.url}]]} if yt_btn else None
+            if await send_tg_message(yt_msg, reply_markup):
+                bot.jobs.last_posted_youtube_url = link
+                posts_sent += 1
+                logger.info(f"Manual Sync: Posted YouTube video: {link}")
+    except Exception as e:
+        logger.error(f"Error manually syncing YouTube: {e}")
+
+    # Sync Medium
+    try:
+        med_msg, med_btn, link = await get_medium_posts(limit=1)
+        if med_msg and link and link != bot.jobs.last_posted_medium_url:
+            reply_markup = {"inline_keyboard": [[{"text": med_btn.text, "url": med_btn.url}]]} if med_btn else None
+            if await send_tg_message(med_msg, reply_markup):
+                bot.jobs.last_posted_medium_url = link
+                posts_sent += 1
+                logger.info(f"Manual Sync: Posted Medium article: {link}")
+    except Exception as e:
+        logger.error(f"Error manually syncing Medium: {e}")
+
+    # Sync Substack
+    try:
+        sub_msg, sub_btn, link = await get_substack_posts(limit=1)
+        if sub_msg and link and link != bot.jobs.last_posted_substack_url:
+            reply_markup = {"inline_keyboard": [[{"text": sub_btn.text, "url": sub_btn.url}]]} if sub_btn else None
+            if await send_tg_message(sub_msg, reply_markup):
+                bot.jobs.last_posted_substack_url = link
+                posts_sent += 1
+                logger.info(f"Manual Sync: Posted Substack newsletter: {link}")
+    except Exception as e:
+        logger.error(f"Error manually syncing Substack: {e}")
+
+    # Sync Facebook
+    try:
+        fb_msg, fb_btn, link = await get_facebook_posts(limit=1)
+        if fb_msg and link and link != bot.jobs.last_posted_facebook_url:
+            reply_markup = {"inline_keyboard": [[{"text": fb_btn.text, "url": fb_btn.url}]]} if fb_btn else None
+            if await send_tg_message(fb_msg, reply_markup):
+                bot.jobs.last_posted_facebook_url = link
+                posts_sent += 1
+                logger.info(f"Manual Sync: Posted Facebook post: {link}")
+    except Exception as e:
+        logger.error(f"Error manually syncing Facebook: {e}")
+
+    # Sync Twitter
+    try:
+        tw_msg, tw_btn, link = await get_twitter_posts(limit=1)
+        if tw_msg and link and link != bot.jobs.last_posted_twitter_url:
+            reply_markup = {"inline_keyboard": [[{"text": tw_btn.text, "url": tw_btn.url}]]} if tw_btn else None
+            if await send_tg_message(tw_msg, reply_markup):
+                bot.jobs.last_posted_twitter_url = link
+                posts_sent += 1
+                logger.info(f"Manual Sync: Posted Twitter tweet: {link}")
+    except Exception as e:
+        logger.error(f"Error manually syncing Twitter: {e}")
+
+    return posts_sent

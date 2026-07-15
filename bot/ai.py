@@ -15,167 +15,42 @@ from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts, ext
 from bot.memory import get_history, add_to_history
 from bot.vectordb import get_document_count
 
-LANG_PROMPTS: Dict[str, str] = {
-    "en": "You are the official Telegram assistant for Bearded Bangali, a tech and lifestyle content creator. Answer in English.",
-    "bn": "আপনি হলেন Bearded Bangali-এর অফিসিয়াল টেলিগ্রাম অ্যাসিস্ট্যান্ট। দয়া করে বাংলায় উত্তর দিন।",
-}
+import os
 
-TOOLS: List[Dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "browse_web",
-            "description": "Fetches the full text content from a given URL. Use this when users ask about current events, recent news, or any topic that requires fetching external web content.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "The URL to fetch and extract text content from"
-                    }
-                },
-                "required": ["url"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_knowledge_base",
-            "description": "Searches the creator's past posts (YouTube, Medium, Instagram) to answer specific questions about gear, opinions, setup, or past content using semantic search.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query (e.g. 'camera setup', 'editing software', 'productivity tips')"
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_faq_answer",
-            "description": "Looks up a quick answer from the frequently asked questions database. Use this for common questions about the creator.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "question": {
-                        "type": "string",
-                        "description": "The user's question to match against FAQ keywords"
-                    }
-                },
-                "required": ["question"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_recent_content",
-            "description": "Fetches the latest posts from a specific content platform.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "platform": {
-                        "type": "string",
-                        "enum": ["youtube", "medium", "substack"],
-                        "description": "The platform to fetch content from"
-                    }
-                },
-                "required": ["platform"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_dua",
-            "description": "Searches the Hisnul Muslim dua (Islamic supplication) database. Use this when users ask for specific duas, Islamic prayers, or supplications for various situations (sleeping, travel, food, sickness, etc.).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query for the dua (e.g. 'dua for sleeping', 'prayer for travel', 'supplication for food')"
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_quran",
-            "description": "Searches the Quran (all 114 surahs, 6236 verses) with Arabic text, word-by-word meanings, and Sahih International translation. Use this when users ask about specific Quran verses, surahs, or topics in the Quran.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query (e.g. 'ayat al-kursi', 'surah yasin', 'verse about mercy', 'quran on patience')"
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "execute_telegram_command",
-            "description": "Executes a built-in Telegram command to manage the user's settings. Use this when the user asks to subscribe/unsubscribe to reminders, clear chat history, change language, or stop studying.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command_name": {
-                        "type": "string",
-                        "enum": ["subscribe", "unsubscribe", "remindertime_morning", "remindertime_evening", "forget", "language_en", "language_bn", "stopstudy"],
-                        "description": "The command action to execute."
-                    }
-                },
-                "required": ["command_name"]
-            }
-        }
-    }
-]
+PROMPTS_FILE = os.path.join(os.path.dirname(__file__), "prompts.json")
+try:
+    with open(PROMPTS_FILE, "r", encoding="utf-8") as f:
+        _prompts_data = json.load(f)
+        LANG_PROMPTS = _prompts_data.get("language_prompts", {})
+        TOOLS = _prompts_data.get("tools", [])
+        SYSTEM_RULES = _prompts_data.get("system_rules", "")
+        STUDY_MODE_PROMPT = _prompts_data.get("study_mode_prompt", "")
+except Exception as e:
+    logger.error(f"Failed to load prompts.json: {e}")
+    LANG_PROMPTS = {}
+    TOOLS = []
+    SYSTEM_RULES = ""
+    STUDY_MODE_PROMPT = ""
 
 def get_system_prompt(user_id: Optional[int] = None, lang: str = "en") -> str:
     faq_context = json.dumps(FAQ, indent=2)
     doc_count = get_document_count()
-    base = f"""
-Rules:
-- If the user greets you with "Salam" or any variation, you MUST reply with "Walikumus Salam".
-- Use the search_knowledge_base tool when users ask about specific gear, setups, opinions, or past content.
-- Use the search_dua tool when users ask for Islamic duas, supplications, prayers, or Hisnul Muslim content. Always include the Arabic, transliteration, translation, and source when answering duas.
-- Use the search_quran tool when users ask about Quran verses, surahs, or Islamic topics from the Quran. Always include the Arabic and translation when quoting verses.
-- Use the get_faq_answer tool for common quick questions.
-- Use the get_recent_content tool when users ask for the latest videos, articles, or newsletters.
-- Use the browse_web tool when users ask about current events, recent news, or any topic requiring external web content.
-- Use the execute_telegram_command tool when users ask to subscribe/unsubscribe to daily reminders, change language, clear chat memory, or stop studying.
-- Always maintain a polite, respectful tone.
-- Keep answers concise (1-3 sentences max) unless the user asks for details.
-- Do not invent facts about the creator. Use tools to find real information.
-
-Knowledge Base Stats:
-- {doc_count} documents indexed in the vector database
-- {len(FAQ)} FAQ entries available
-
-Current FAQs/Facts:
-{faq_context}
-
-Social Media Links:
-- YouTube: {YOUTUBE_LINK}
-- Medium: {MEDIUM_LINK}
-- Instagram: {INSTAGRAM_LINK}
-- X/Twitter: {TWITTER_LINK}
-- Facebook: {FACEBOOK_LINK}
-"""
-    lang_prompt = LANG_PROMPTS.get(lang, LANG_PROMPTS["en"])
+    try:
+        base = SYSTEM_RULES.format(
+            doc_count=doc_count,
+            faq_count=len(FAQ),
+            faq_context=faq_context,
+            YOUTUBE_LINK=YOUTUBE_LINK,
+            MEDIUM_LINK=MEDIUM_LINK,
+            INSTAGRAM_LINK=INSTAGRAM_LINK,
+            TWITTER_LINK=TWITTER_LINK,
+            FACEBOOK_LINK=FACEBOOK_LINK
+        )
+    except Exception as e:
+        logger.error(f"Error formatting SYSTEM_RULES: {e}")
+        base = SYSTEM_RULES
+        
+    lang_prompt = LANG_PROMPTS.get(lang, LANG_PROMPTS.get("en", ""))
     return lang_prompt + "\n" + base
 
 async def execute_tool(tool_name: str, arguments: dict, user_id: Optional[int] = None) -> str:
@@ -336,12 +211,15 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
     if study_book:
         from bot.search import search_book
         book_context = search_book(user_message, study_book, n_results=4)
-        system_prompt = (
-            f"You are an AI study assistant. The user is currently studying the book '{study_book}'.\n"
-            f"Use the following excerpts from the book to answer the user's question accurately.\n"
-            f"Even if the excerpts are in a different language (like Arabic), you MUST reply and converse with the user in their language (or the language of their prompt).\n\n"
-            f"Book Excerpts:\n{book_context}"
-        )
+        try:
+            system_prompt = STUDY_MODE_PROMPT.format(study_book=study_book, book_context=book_context)
+        except Exception:
+            system_prompt = (
+                f"You are an AI study assistant. The user is currently studying the book '{study_book}'.\n"
+                f"Use the following excerpts from the book to answer the user's question accurately.\n"
+                f"Even if the excerpts are in a different language (like Arabic), you MUST reply and converse with the user in their language (or the language of their prompt).\n\n"
+                f"Book Excerpts:\n{book_context}"
+            )
     else:
         system_prompt = get_system_prompt(user_id, lang=lang).strip()
     

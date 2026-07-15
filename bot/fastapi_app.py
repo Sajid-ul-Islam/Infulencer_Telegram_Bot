@@ -27,7 +27,8 @@ from bot.database import (
     get_trending_searches, get_token_usage_stats, get_user_retention_stats
 )
 from bot.pipeline import get_pipeline_stats
-from bot.server import DASHBOARD_HTML, ping_history, START_TIME, memory_log_handler, check_and_sync_rss_manually, ping_self
+from bot.utils import ping_history, START_TIME, memory_log_handler
+from bot.rss import check_and_sync_rss_manually
 
 app = FastAPI(title="BB Bot HUB Admin")
 
@@ -56,7 +57,8 @@ async def healthz():
 
 @app.get("/", response_class=HTMLResponse)
 async def get_dashboard():
-    return DASHBOARD_HTML
+    with open("templates/dashboard.html", "r", encoding="utf-8") as f:
+        return f.read()
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
@@ -264,8 +266,7 @@ async def get_retention():
 
 @app.post("/api/rss/sync", dependencies=[Depends(check_auth)])
 async def sync_rss():
-    loop = asyncio.get_event_loop()
-    count = await loop.run_in_executor(None, check_and_sync_rss_manually)
+    count = await check_and_sync_rss_manually()
     return {"status": "success", "synced": count}
 
 @app.post("/api/moderation/ban", dependencies=[Depends(check_auth)])
