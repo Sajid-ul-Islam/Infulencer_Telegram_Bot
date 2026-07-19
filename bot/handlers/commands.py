@@ -356,8 +356,8 @@ async def quran_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @track_usage("forget")
 async def forget_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    count = get_history_count(user_id)
-    clear_history(user_id)
+    count = await get_history_count(user_id)
+    await clear_history(user_id)
     await update.message.reply_text(
         f"\U0001f9f9 Conversation history cleared! I've forgotten our previous {count} exchanges.",
         parse_mode="HTML",

@@ -3,11 +3,9 @@
 ## What This Bot Does
 
 ✅ **Auto-Posts Your Content**
-- Fetches latest YouTube videos daily
-- Fetches latest Medium articles daily
-- Fetches latest Substack newsletters daily
-- Posts to your Telegram channel automatically
+- Posts ONE piece of content daily at 9 AM from YouTube, Medium, Substack, Facebook, or Twitter
 - Posts daily Islamic reminders (morning & evening)
+- Weekly digest every Saturday
 
 ✅ **AI-Powered Q&A**
 - Multi-provider AI with 8 fallback providers

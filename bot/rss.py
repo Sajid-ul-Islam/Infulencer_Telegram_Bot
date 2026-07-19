@@ -1,8 +1,15 @@
+import re
 import html
+import random
 import httpx
 import feedparser
+from typing import Optional, Tuple
 from telegram import InlineKeyboardButton
-from bot.config import logger, YOUTUBE_CHANNEL_ID, YOUTUBE_LINK, MEDIUM_USERNAME, MEDIUM_LINK, SUBSTACK_URL, FACEBOOK_LINK, FACEBOOK_RSS_URL, TWITTER_LINK, TWITTER_RSS_URL
+from bot.config import (
+    logger, YOUTUBE_CHANNEL_ID, YOUTUBE_LINK, MEDIUM_USERNAME, MEDIUM_LINK,
+    SUBSTACK_URL, FACEBOOK_LINK, FACEBOOK_RSS_URL, TWITTER_LINK, TWITTER_RSS_URL
+)
+
 
 async def extract_article_text(url: str) -> str:
     try:
@@ -13,7 +20,6 @@ async def extract_article_text(url: str) -> str:
     except Exception as e:
         logger.error(f"extract_article_text fetch error: {e}")
         return f"Failed to fetch {url}: {e}"
-    import re
     content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL)
     content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL)
     content = re.sub(r'<nav[^>]*>.*?</nav>', '', content, flags=re.DOTALL)
@@ -27,204 +33,189 @@ async def extract_article_text(url: str) -> str:
         text = text[:3000] + "..."
     return text or f"No readable content found at {url}"
 
-async def get_youtube_posts(limit=3, return_url_only=False, random_old=False):
-    """Fetch latest YouTube videos"""
+
+def _clean_title(entry) -> str:
+    """Extract and clean a title from an RSS entry, handling short/generic titles."""
+    title = entry.title
+    if not title or len(title) < 5:
+        title = getattr(entry, 'summary', None) or getattr(entry, 'description', None) or "New Post"
+    clean = re.sub(r'<[^>]+>', '', title)
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    if len(clean) > 60:
+        clean = clean[:60] + "..."
+    return clean
+
+
+async def _fetch_rss_feed(
+    rss_url: str,
+    limit: int = 3,
+    return_url_only: bool = False,
+    random_old: bool = False,
+    clean_titles: bool = False,
+) -> Optional[Tuple]:
+    """Generic RSS feed fetcher. Returns (message, button, first_link) or None.
+
+    Args:
+        rss_url: The RSS feed URL to fetch.
+        limit: Number of entries to return.
+        return_url_only: If True, return only the first entry's URL.
+        random_old: If True, skip the first entry and pick randomly from the rest.
+        clean_titles: If True, strip HTML and truncate long titles (for Facebook/Twitter).
+    """
     try:
-        rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={YOUTUBE_CHANNEL_ID}"
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(rss_url)
             feed = feedparser.parse(response.content)
-            
-        if feed.entries:
-            if return_url_only:
-                return feed.entries[0].link
 
-            if random_old and len(feed.entries) > 1:
-                import random
-                entries_to_use = random.sample(feed.entries[1:], min(limit, len(feed.entries) - 1))
-                message = "🎥 <b>Throwback Video:</b>\n\n"
-            else:
-                entries_to_use = feed.entries[:limit]
-                message = "🎥 <b>Latest Videos:</b>\n\n"
+        if not feed.entries:
+            return None
 
-            for i, entry in enumerate(entries_to_use):
-                safe_title = html.escape(entry.title)
-                message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>Watch Now</a>\n\n"
-            
-            button = InlineKeyboardButton("View Channel 📺", url=YOUTUBE_LINK)
-            return message.strip(), button, entries_to_use[0].link
+        if return_url_only:
+            return feed.entries[0].link
+
+        if random_old and len(feed.entries) > 1:
+            entries_to_use = random.sample(feed.entries[1:], min(limit, len(feed.entries) - 1))
+        else:
+            entries_to_use = feed.entries[:limit]
+
+        return entries_to_use, clean_titles
     except Exception as e:
-        logger.error(f"Error fetching YouTube: {e}")
-    
-    if return_url_only: return None
-    return None, None, None
+        logger.error(f"Error fetching RSS feed {rss_url}: {e}")
+        return None
+
+
+def _build_rss_message(
+    entries: list,
+    emoji: str,
+    latest_label: str,
+    throwback_label: str,
+    action_text: str,
+    is_random: bool,
+    clean_titles: bool = False,
+) -> str:
+    """Build a formatted message from RSS entries."""
+    label = throwback_label if is_random else latest_label
+    message = f"{emoji} <b>{label}</b>\n\n"
+    for i, entry in enumerate(entries):
+        if clean_titles:
+            title = html.escape(_clean_title(entry))
+        else:
+            title = html.escape(entry.title)
+        message += f"{i+1}. <b>{title}</b>\n<a href='{entry.link}'>{action_text}</a>\n\n"
+    return message.strip()
+
+
+# ── Platform-specific wrappers ──────────────────────────────────
+
+async def get_youtube_posts(limit=3, return_url_only=False, random_old=False):
+    """Fetch latest YouTube videos."""
+    result = await _fetch_rss_feed(
+        f"https://www.youtube.com/feeds/videos.xml?channel_id={YOUTUBE_CHANNEL_ID}",
+        limit=limit, return_url_only=return_url_only, random_old=random_old,
+    )
+    if result is None:
+        if return_url_only:
+            return None
+        return None, None, None
+    if return_url_only:
+        return result
+    entries, _ = result
+    message = _build_rss_message(entries, "\U0001f3a5", "Latest Videos", "Throwback Video", "Watch Now", random_old)
+    button = InlineKeyboardButton("View Channel \U0001f4fa", url=YOUTUBE_LINK)
+    return message, button, entries[0].link
+
 
 async def get_medium_posts(limit=3, return_url_only=False, random_old=False):
-    """Fetch latest Medium articles"""
-    try:
-        rss_url = f"https://medium.com/feed/@{MEDIUM_USERNAME}"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(rss_url)
-            feed = feedparser.parse(response.content)
-            
-        if feed.entries:
-            if return_url_only:
-                return feed.entries[0].link
+    """Fetch latest Medium articles."""
+    result = await _fetch_rss_feed(
+        f"https://medium.com/feed/@{MEDIUM_USERNAME}",
+        limit=limit, return_url_only=return_url_only, random_old=random_old,
+    )
+    if result is None:
+        if return_url_only:
+            return None
+        return None, None, None
+    if return_url_only:
+        return result
+    entries, _ = result
+    message = _build_rss_message(entries, "\U0001f4dd", "Latest Articles", "Throwback Article", "Read Now", random_old)
+    button = InlineKeyboardButton("View Profile \U0001f4dd", url=MEDIUM_LINK)
+    return message, button, entries[0].link
 
-            if random_old and len(feed.entries) > 1:
-                import random
-                entries_to_use = random.sample(feed.entries[1:], min(limit, len(feed.entries) - 1))
-                message = "📝 <b>Throwback Article:</b>\n\n"
-            else:
-                entries_to_use = feed.entries[:limit]
-                message = "📝 <b>Latest Articles:</b>\n\n"
-
-            for i, entry in enumerate(entries_to_use):
-                safe_title = html.escape(entry.title)
-                message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>Read Now</a>\n\n"
-            
-            button = InlineKeyboardButton("View Profile 📝", url=MEDIUM_LINK)
-            return message.strip(), button, entries_to_use[0].link
-    except Exception as e:
-        logger.error(f"Error fetching Medium: {e}")
-    
-    if return_url_only: return None
-    return None, None, None
 
 async def get_substack_posts(limit=3, return_url_only=False, random_old=False):
-    """Fetch latest Substack newsletters"""
-    try:
-        # Substack RSS feed is always base_url/feed
-        rss_url = f"{SUBSTACK_URL.rstrip('/')}/feed"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(rss_url)
-            feed = feedparser.parse(response.content)
-            
-        if feed.entries:
-            if return_url_only:
-                return feed.entries[0].link
+    """Fetch latest Substack newsletters."""
+    result = await _fetch_rss_feed(
+        f"{SUBSTACK_URL.rstrip('/')}/feed",
+        limit=limit, return_url_only=return_url_only, random_old=random_old,
+    )
+    if result is None:
+        if return_url_only:
+            return None
+        return None, None, None
+    if return_url_only:
+        return result
+    entries, _ = result
+    message = _build_rss_message(entries, "\U0001f4f0", "Latest Newsletters", "Throwback Newsletter", "Read Issue", random_old)
+    button = InlineKeyboardButton("Subscribe on Substack \U0001f4f0", url=SUBSTACK_URL)
+    return message, button, entries[0].link
 
-            if random_old and len(feed.entries) > 1:
-                import random
-                entries_to_use = random.sample(feed.entries[1:], min(limit, len(feed.entries) - 1))
-                message = "📰 <b>Throwback Newsletter:</b>\n\n"
-            else:
-                entries_to_use = feed.entries[:limit]
-                message = "📰 <b>Latest Newsletters:</b>\n\n"
-
-            for i, entry in enumerate(entries_to_use):
-                safe_title = html.escape(entry.title)
-                message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>Read Issue</a>\n\n"
-            
-            button = InlineKeyboardButton("Subscribe on Substack 📰", url=SUBSTACK_URL)
-            return message.strip(), button, entries_to_use[0].link
-    except Exception as e:
-        logger.error(f"Error fetching Substack: {e}")
-    
-    if return_url_only: return None
-    return None, None, None
 
 async def get_facebook_posts(limit=3, return_url_only=False, random_old=False):
-    """Fetch latest Facebook posts from configured RSS url"""
+    """Fetch latest Facebook posts from configured RSS url."""
     if not FACEBOOK_RSS_URL:
         logger.warning("FACEBOOK_RSS_URL not configured. Skipping Facebook RSS fetch.")
-        if return_url_only: return None
+        if return_url_only:
+            return None
         return None, None, None
-        
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(FACEBOOK_RSS_URL)
-            feed = feedparser.parse(response.content)
-            
-        if feed.entries:
-            if return_url_only:
-                return feed.entries[0].link
+    result = await _fetch_rss_feed(
+        FACEBOOK_RSS_URL,
+        limit=limit, return_url_only=return_url_only, random_old=random_old,
+        clean_titles=True,
+    )
+    if result is None:
+        if return_url_only:
+            return None
+        return None, None, None
+    if return_url_only:
+        return result
+    entries, _ = result
+    message = _build_rss_message(entries, "\U0001f44d", "Latest Facebook Posts", "Throwback Facebook Post", "View Post", random_old, clean_titles=True)
+    button = InlineKeyboardButton("View Facebook Page \U0001f44d", url=FACEBOOK_LINK)
+    return message, button, entries[0].link
 
-            if random_old and len(feed.entries) > 1:
-                import random
-                entries_to_use = random.sample(feed.entries[1:], min(limit, len(feed.entries) - 1))
-                message = "👍 <b>Throwback Facebook Post:</b>\n\n"
-            else:
-                entries_to_use = feed.entries[:limit]
-                message = "👍 <b>Latest Facebook Posts:</b>\n\n"
-
-            for i, entry in enumerate(entries_to_use):
-                # Fallback to summary or description if title is too short or generic
-                title = entry.title
-                if not title or len(title) < 5:
-                    title = entry.summary or entry.description or "New Post"
-                
-                # Strip HTML tags from title for clean display
-                import re
-                clean_title = re.sub(r'<[^>]+>', '', title)
-                clean_title = re.sub(r'\s+', ' ', clean_title).strip()
-                if len(clean_title) > 60:
-                    clean_title = clean_title[:60] + "..."
-                
-                safe_title = html.escape(clean_title)
-                message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>View Post</a>\n\n"
-            
-            button = InlineKeyboardButton("View Facebook Page 👍", url=FACEBOOK_LINK)
-            return message.strip(), button, entries_to_use[0].link
-    except Exception as e:
-        logger.error(f"Error fetching Facebook RSS: {e}")
-    
-    if return_url_only: return None
-    return None, None, None
 
 async def get_twitter_posts(limit=3, return_url_only=False, random_old=False):
-    """Fetch latest Twitter/X posts from configured RSS url"""
+    """Fetch latest Twitter/X posts from configured RSS url."""
     if not TWITTER_RSS_URL:
         logger.warning("TWITTER_RSS_URL not configured. Skipping Twitter RSS fetch.")
-        if return_url_only: return None
+        if return_url_only:
+            return None
         return None, None, None
-        
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(TWITTER_RSS_URL)
-            feed = feedparser.parse(response.content)
-            
-        if feed.entries:
-            if return_url_only:
-                return feed.entries[0].link
+    result = await _fetch_rss_feed(
+        TWITTER_RSS_URL,
+        limit=limit, return_url_only=return_url_only, random_old=random_old,
+        clean_titles=True,
+    )
+    if result is None:
+        if return_url_only:
+            return None
+        return None, None, None
+    if return_url_only:
+        return result
+    entries, _ = result
+    message = _build_rss_message(entries, "\U0001f426", "Latest Tweets", "Throwback Tweet", "View Tweet", random_old, clean_titles=True)
+    button = InlineKeyboardButton("View Twitter Page \U0001f426", url=TWITTER_LINK)
+    return message, button, entries[0].link
 
-            if random_old and len(feed.entries) > 1:
-                import random
-                entries_to_use = random.sample(feed.entries[1:], min(limit, len(feed.entries) - 1))
-                message = "🐦 <b>Throwback Tweet:</b>\n\n"
-            else:
-                entries_to_use = feed.entries[:limit]
-                message = "🐦 <b>Latest Tweets:</b>\n\n"
 
-            for i, entry in enumerate(entries_to_use):
-                title = entry.title
-                if not title or len(title) < 5:
-                    title = entry.summary or entry.description or "New Tweet"
-                
-                # Strip HTML tags
-                import re
-                clean_title = re.sub(r'<[^>]+>', '', title)
-                clean_title = re.sub(r'\s+', ' ', clean_title).strip()
-                if len(clean_title) > 60:
-                    clean_title = clean_title[:60] + "..."
-                
-                safe_title = html.escape(clean_title)
-                message += f"{i+1}. <b>{safe_title}</b>\n<a href='{entry.link}'>View Tweet</a>\n\n"
-            
-            button = InlineKeyboardButton("View Twitter Page 🐦", url=TWITTER_LINK)
-            return message.strip(), button, entries_to_use[0].link
-    except Exception as e:
-        logger.error(f"Error fetching Twitter RSS: {e}")
-    
-    if return_url_only: return None
-    return None, None, None
-
+# ── Manual sync ─────────────────────────────────────────────────
 
 async def check_and_sync_rss_manually():
-    """Manually fetches latest YouTube, Medium, and Substack entries and broadcasts to channel if new."""
+    """Manually fetches latest entries from all platforms and broadcasts to channel if new."""
     import bot.jobs
     from bot.config import TELEGRAM_TOKEN, CHANNEL_ID
-    
+
     async def send_tg_message(text, reply_markup=None):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": CHANNEL_ID, "text": text, "parse_mode": "HTML"}
@@ -234,66 +225,25 @@ async def check_and_sync_rss_manually():
             res = await client.post(url, json=payload)
             return res.status_code == 200
 
+    platforms = [
+        ("YouTube", get_youtube_posts, "last_posted_youtube_url"),
+        ("Medium", get_medium_posts, "last_posted_medium_url"),
+        ("Substack", get_substack_posts, "last_posted_substack_url"),
+        ("Facebook", get_facebook_posts, "last_posted_facebook_url"),
+        ("Twitter", get_twitter_posts, "last_posted_twitter_url"),
+    ]
+
     posts_sent = 0
-
-    # Sync YouTube
-    try:
-        yt_msg, yt_btn, link = await get_youtube_posts(limit=1)
-        if yt_msg and link and link != bot.jobs.last_posted_youtube_url:
-            reply_markup = {"inline_keyboard": [[{"text": yt_btn.text, "url": yt_btn.url}]]} if yt_btn else None
-            if await send_tg_message(yt_msg, reply_markup):
-                bot.jobs.last_posted_youtube_url = link
-                posts_sent += 1
-                logger.info(f"Manual Sync: Posted YouTube video: {link}")
-    except Exception as e:
-        logger.error(f"Error manually syncing YouTube: {e}")
-
-    # Sync Medium
-    try:
-        med_msg, med_btn, link = await get_medium_posts(limit=1)
-        if med_msg and link and link != bot.jobs.last_posted_medium_url:
-            reply_markup = {"inline_keyboard": [[{"text": med_btn.text, "url": med_btn.url}]]} if med_btn else None
-            if await send_tg_message(med_msg, reply_markup):
-                bot.jobs.last_posted_medium_url = link
-                posts_sent += 1
-                logger.info(f"Manual Sync: Posted Medium article: {link}")
-    except Exception as e:
-        logger.error(f"Error manually syncing Medium: {e}")
-
-    # Sync Substack
-    try:
-        sub_msg, sub_btn, link = await get_substack_posts(limit=1)
-        if sub_msg and link and link != bot.jobs.last_posted_substack_url:
-            reply_markup = {"inline_keyboard": [[{"text": sub_btn.text, "url": sub_btn.url}]]} if sub_btn else None
-            if await send_tg_message(sub_msg, reply_markup):
-                bot.jobs.last_posted_substack_url = link
-                posts_sent += 1
-                logger.info(f"Manual Sync: Posted Substack newsletter: {link}")
-    except Exception as e:
-        logger.error(f"Error manually syncing Substack: {e}")
-
-    # Sync Facebook
-    try:
-        fb_msg, fb_btn, link = await get_facebook_posts(limit=1)
-        if fb_msg and link and link != bot.jobs.last_posted_facebook_url:
-            reply_markup = {"inline_keyboard": [[{"text": fb_btn.text, "url": fb_btn.url}]]} if fb_btn else None
-            if await send_tg_message(fb_msg, reply_markup):
-                bot.jobs.last_posted_facebook_url = link
-                posts_sent += 1
-                logger.info(f"Manual Sync: Posted Facebook post: {link}")
-    except Exception as e:
-        logger.error(f"Error manually syncing Facebook: {e}")
-
-    # Sync Twitter
-    try:
-        tw_msg, tw_btn, link = await get_twitter_posts(limit=1)
-        if tw_msg and link and link != bot.jobs.last_posted_twitter_url:
-            reply_markup = {"inline_keyboard": [[{"text": tw_btn.text, "url": tw_btn.url}]]} if tw_btn else None
-            if await send_tg_message(tw_msg, reply_markup):
-                bot.jobs.last_posted_twitter_url = link
-                posts_sent += 1
-                logger.info(f"Manual Sync: Posted Twitter tweet: {link}")
-    except Exception as e:
-        logger.error(f"Error manually syncing Twitter: {e}")
+    for name, fetcher, attr in platforms:
+        try:
+            msg, btn, link = await fetcher(limit=1)
+            if msg and link and link != getattr(bot.jobs, attr):
+                reply_markup = {"inline_keyboard": [[{"text": btn.text, "url": btn.url}]]} if btn else None
+                if await send_tg_message(msg, reply_markup):
+                    setattr(bot.jobs, attr, link)
+                    posts_sent += 1
+                    logger.info(f"Manual Sync: Posted {name}: {link}")
+        except Exception as e:
+            logger.error(f"Error manually syncing {name}: {e}")
 
     return posts_sent

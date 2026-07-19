@@ -40,12 +40,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limiter for login attempts: {ip: (attempts, first_attempt_time)}
+_login_attempts: dict[str, tuple[int, float]] = {}
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 300  # 5 minutes
+
+
+def _check_login_rate_limit(ip: str) -> bool:
+    """Returns True if the IP is allowed to attempt login."""
+    now = time.time()
+    if ip in _login_attempts:
+        count, first_time = _login_attempts[ip]
+        if now - first_time > _LOGIN_WINDOW_SECONDS:
+            _login_attempts[ip] = (1, now)
+            return True
+        if count >= _LOGIN_MAX_ATTEMPTS:
+            return False
+        _login_attempts[ip] = (count + 1, first_time)
+        return True
+    _login_attempts[ip] = (1, now)
+    return True
+
+
 def check_auth(request: Request):
+    if not DASHBOARD_PASSWORD:
+        raise HTTPException(status_code=503, detail="Dashboard password not configured")
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     token = auth_header.split(" ")[1]
-    if DASHBOARD_PASSWORD and token != DASHBOARD_PASSWORD:
+    if token != DASHBOARD_PASSWORD:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return True
 
@@ -126,9 +150,24 @@ async def receive_meta_webhook(request: Request):
 
 @app.post("/api/login")
 async def login(request: Request):
+    if not DASHBOARD_PASSWORD:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Dashboard password not configured. Set DASHBOARD_PASSWORD environment variable."}
+        )
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_login_rate_limit(client_ip):
+        return JSONResponse(
+            status_code=429,
+            content={"error": "Too many login attempts. Try again in 5 minutes."}
+        )
+
     data = await request.json()
     password = data.get("password")
-    if DASHBOARD_PASSWORD and password == DASHBOARD_PASSWORD:
+    if password == DASHBOARD_PASSWORD:
+        # Reset rate limit on successful login
+        _login_attempts.pop(client_ip, None)
         return {"token": DASHBOARD_PASSWORD}
     return JSONResponse(status_code=401, content={"error": "Invalid password"})
 

@@ -7,7 +7,7 @@ This document serves as the guide for the **Bearded Bangali Telegram & Meta Assi
 ## 🎯 Project Goal
 
 The primary goal is to maintain and expand a multi-platform virtual assistant for the **Bearded Bangali** content creator community that:
-1. **Syndicates Content**: Automatically fetches new YouTube, Medium, and Substack updates via RSS feeds and broadcasts them to the Telegram channel.
+1. **Syndicates Content**: Once daily, automatically picks ONE piece of new content from YouTube, Medium, Substack, Facebook, or Twitter via RSS feeds and broadcasts it to the Telegram channel (avoids spamming with multiple daily posts).
 2. **Answers Community Queries**: Provides accurate answers to user questions (RAG/Hybrid Search) using the creator's knowledge base, the *Hisnul Muslim* authentic Islamic dua database, and the complete Quran (6236 verses across 114 surahs).
 3. **Engages Followers**: Supports interactive features (giveaways, polls, quizzes, content scheduling, inline search, suggestions, bookmarks) via Telegram and Meta (WhatsApp, Messenger, Instagram).
 4. **Ensures 100% Uptime on Free Hosting**: Operates efficiently on Render's free tier using a self-pinging keep-alive mechanism to prevent containers from falling asleep.

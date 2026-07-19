@@ -12,7 +12,7 @@ from bot.config import (
 from bot.database import FAQ, track_token_usage
 from bot.search import search_pipeline, search_duas, search_quran
 from bot.rss import get_youtube_posts, get_medium_posts, get_substack_posts, extract_article_text
-from bot.memory import get_history, add_to_history
+from bot.memory import get_history, add_to_history, clear_history, _chat_histories, MAX_HISTORY
 from bot.vectordb import get_document_count
 
 import os
@@ -96,7 +96,6 @@ async def execute_tool(tool_name: str, arguments: dict, user_id: Optional[int] =
             return "Cannot execute command: User ID is missing."
         cmd = arguments.get("command_name", "")
         from bot.database import subscribe_user, unsubscribe_user, set_reminder_time, set_user_language, set_study_mode
-        from bot.memory import clear_history
         if cmd == "subscribe":
             return "User successfully subscribed to daily reminders." if subscribe_user(user_id, "User") else "Failed to subscribe."
         elif cmd == "unsubscribe":
@@ -106,7 +105,7 @@ async def execute_tool(tool_name: str, arguments: dict, user_id: Optional[int] =
         elif cmd == "remindertime_evening":
             return "Reminder time set to evening (6 PM)." if set_reminder_time(user_id, "evening") else "Failed to set time."
         elif cmd == "forget":
-            clear_history(user_id)
+            await clear_history(user_id)
             return "Conversation history successfully cleared."
         elif cmd == "language_en":
             return "Language successfully set to English." if set_user_language(user_id, "en") else "Failed to set language."
@@ -225,16 +224,15 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
     
     history = []
     if use_memory and user_id:
-        from bot.memory import _chat_histories, MAX_HISTORY, get_history, add_to_history
-        history = get_history(user_id, max_exchanges=3)
+        history = await get_history(user_id, max_exchanges=3)
         
     # Semantic Caching
     if not history:
         cached = get_cached_response(user_message)
         if cached:
             if use_memory and user_id:
-                add_to_history(user_id, "user", user_message)
-                add_to_history(user_id, "assistant", cached)
+                await add_to_history(user_id, "user", user_message)
+                await add_to_history(user_id, "assistant", cached)
             return cached
 
     messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": user_message}]
@@ -353,8 +351,8 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                 final_res = validate_arabic_text(final_res, tool_outputs)
                 
                 if use_memory and user_id:
-                    add_to_history(user_id, "user", user_message)
-                    add_to_history(user_id, "assistant", final_res)
+                    await add_to_history(user_id, "user", user_message)
+                    await add_to_history(user_id, "assistant", final_res)
                     
                     history_len = len(_chat_histories.get(user_id, []))
                     if history_len > MAX_HISTORY * 2:

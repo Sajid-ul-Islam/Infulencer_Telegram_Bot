@@ -934,8 +934,8 @@ async def _cmd_forget(phone_number_id: str, sender_id: str):
     user_id = _to_user_id(sender_id) or 0
 
     from bot.memory import clear_history, get_history_count
-    count = get_history_count(user_id)
-    clear_history(user_id)
+    count = await get_history_count(user_id)
+    await clear_history(user_id)
     await send_whatsapp_message(phone_number_id, sender_id,
         f"🧹 *Conversation history cleared!* I've forgotten our previous {count} exchanges.")
 

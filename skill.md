@@ -6,8 +6,9 @@ This file documents the specialized skills the bot possesses.
 - **YouTube RSS**: Uses `feedparser` to parse `https://www.youtube.com/feeds/videos.xml?channel_id={YOUTUBE_CHANNEL_ID}`.
 - **Medium RSS**: Parses `https://medium.com/feed/@{MEDIUM_USERNAME}`.
 - **Substack RSS**: Parses `{SUBSTACK_URL}/feed`.
-- **Auto-Posting**: JobQueue schedules daily checks at 09:00 (YouTube), 14:00 (Substack), 18:00 (Medium). If new content detected, broadcasts to channel.
-- **Auto-Ingest**: Each RSS auto-post also triggers `ingest_rss_content()` which chunks and embeds the new content into the vector DB.
+- **Daily Content Post**: Once daily at 9 AM, picks ONE piece of content from a random platform and posts to channel. Avoids spamming the channel with multiple posts.
+- **Admin Manual Post**: Admin can use `/postlatest` to force-broadcast latest content from all platforms.
+- **Auto-Ingest**: Each auto-post also triggers `ingest_rss_content()` which chunks and embeds the new content into the vector DB.
 - **YouTube Transcription**: Videos are transcribed via Groq Whisper and ingested as searchable text content.
 
 ## 2. Agentic RAG with Hybrid Search

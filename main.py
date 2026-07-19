@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from bot.config import logger, TELEGRAM_TOKEN, BOT_TZ, ADMIN_ID, RENDER_EXTERNAL_URL, WEBHOOK_URL, validate_ai_keys
 from bot.database import load_faqs
 from bot.utils import ping_self
-from bot.jobs import auto_post_youtube, auto_post_medium, auto_post_substack, auto_post_facebook, auto_post_twitter, greeting_post, weekly_digest, daily_islamic_reminder, evening_islamic_reminder, scheduled_content_hub_post, process_post_queue
+from bot.jobs import daily_islamic_reminder, evening_islamic_reminder, scheduled_content_hub_post, weekly_digest, process_post_queue
 from bot.pipeline import ingest_knowledge_base, ingest_duas, ingest_quran_verses
 from bot.handlers.commands import (
     start, socials_command, latest, youtube, medium, substack,
@@ -209,6 +209,8 @@ def build_application() -> Application:
 
     # Schedule recurring jobs
     job_queue = application.job_queue
+
+    # Islamic reminders — twice daily (morning + evening)
     job_queue.run_daily(
         daily_islamic_reminder, time=datetime.time(10, 0, tzinfo=BOT_TZ),
         days=(0, 1, 2, 3, 4, 5, 6)
@@ -217,40 +219,17 @@ def build_application() -> Application:
         evening_islamic_reminder, time=datetime.time(18, 0, tzinfo=BOT_TZ),
         days=(0, 1, 2, 3, 4, 5, 6)
     )
-    job_queue.run_repeating(
-        auto_post_youtube,
-        interval=21600,
-        first=3600
+
+    # Content posting — once daily at 9 AM (picks ONE piece of content from a random platform)
+    job_queue.run_daily(
+        scheduled_content_hub_post, time=datetime.time(9, 0, tzinfo=BOT_TZ),
+        days=(0, 1, 2, 3, 4, 5, 6)
     )
-    job_queue.run_repeating(
-        auto_post_medium,
-        interval=21600,
-        first=4500
-    )
-    job_queue.run_repeating(
-        auto_post_substack,
-        interval=21600,
-        first=5400
-    )
-    job_queue.run_repeating(
-        auto_post_facebook,
-        interval=21600,
-        first=6300
-    )
-    job_queue.run_repeating(
-        auto_post_twitter,
-        interval=21600,
-        first=7200
-    )
+
+    # Weekly digest — Saturdays at noon
     job_queue.run_daily(
         weekly_digest, time=datetime.time(12, 0, tzinfo=BOT_TZ),
         days=(6,)
-    )
-
-    job_queue.run_repeating(
-        scheduled_content_hub_post,
-        interval=21600,
-        first=8100
     )
 
     # Queue processor runs every 15 minutes (900 seconds)

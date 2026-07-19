@@ -1,4 +1,3 @@
-import json
 import logging
 from collections import defaultdict
 from typing import Optional
@@ -22,7 +21,7 @@ def _get_db():
 
 
 def _load_from_firestore(user_id: int) -> list[dict]:
-    """Load conversation history from Firestore for a user."""
+    """Load conversation history from Firestore for a user (blocking)."""
     db = _get_db()
     if not db:
         return []
@@ -40,12 +39,11 @@ def _load_from_firestore(user_id: int) -> list[dict]:
 
 
 def _save_to_firestore(user_id: int, messages: list[dict]) -> None:
-    """Save conversation history to Firestore for a user."""
+    """Save conversation history to Firestore for a user (blocking)."""
     db = _get_db()
     if not db:
         return
     try:
-        # Keep only the last MAX_HISTORY * 2 messages to avoid huge docs
         trimmed = messages[-(MAX_HISTORY * 2):]
         db.collection("chat_histories").document(str(user_id)).set({
             "user_id": user_id,
@@ -56,60 +54,61 @@ def _save_to_firestore(user_id: int, messages: list[dict]) -> None:
         logger.error(f"Error saving history to Firestore for {user_id}: {e}")
 
 
-def _ensure_loaded(user_id: int) -> None:
-    """Ensure user history is loaded from Firestore into cache."""
-    if user_id not in _loaded_users:
-        _chat_histories[user_id] = _load_from_firestore(user_id)
-        _loaded_users.add(user_id)
+def _delete_from_firestore(user_id: int) -> None:
+    """Delete conversation history from Firestore for a user (blocking)."""
+    db = _get_db()
+    if not db:
+        return
+    try:
+        db.collection("chat_histories").document(str(user_id)).delete()
+    except Exception as e:
+        logger.error(f"Error clearing Firestore history for {user_id}: {e}")
 
 
-def add_to_history(user_id: int, role: str, content: str) -> None:
+async def _ensure_loaded(user_id: int) -> None:
+    """Ensure user history is loaded from Firestore into cache (non-blocking)."""
+    if user_id in _loaded_users:
+        return
+    import asyncio
+    loop = asyncio.get_event_loop()
+    _chat_histories[user_id] = await loop.run_in_executor(None, _load_from_firestore, user_id)
+    _loaded_users.add(user_id)
+
+
+async def add_to_history(user_id: int, role: str, content: str) -> None:
     """Add a message to the user's conversation history."""
-    _ensure_loaded(user_id)
+    await _ensure_loaded(user_id)
     _chat_histories[user_id].append({"role": role, "content": content})
     # Persist to Firestore asynchronously to avoid blocking the event loop
     try:
         import asyncio
         loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.run_in_executor(None, _save_to_firestore, user_id, _chat_histories[user_id])
-        else:
-            _save_to_firestore(user_id, _chat_histories[user_id])
+        loop.run_in_executor(None, _save_to_firestore, user_id, _chat_histories[user_id])
     except Exception:
         pass
 
 
-def get_history(user_id: int, max_exchanges: int = 3) -> list[dict]:
+async def get_history(user_id: int, max_exchanges: int = 3) -> list[dict]:
     """Get recent conversation history for a user."""
-    _ensure_loaded(user_id)
+    await _ensure_loaded(user_id)
     history = _chat_histories.get(user_id, [])
     return history[-(max_exchanges * 2):]
 
 
-def clear_history(user_id: int) -> None:
+async def clear_history(user_id: int) -> None:
     """Clear a user's conversation history from cache and Firestore."""
     if user_id in _chat_histories:
         del _chat_histories[user_id]
     _loaded_users.discard(user_id)
-    db = _get_db()
-    if db:
-        def _delete():
-            try:
-                db.collection("chat_histories").document(str(user_id)).delete()
-            except Exception as e:
-                logger.error(f"Error clearing Firestore history for {user_id}: {e}")
-        try:
-            import asyncio
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.run_in_executor(None, _delete)
-            else:
-                _delete()
-        except Exception:
-            pass
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, _delete_from_firestore, user_id)
+    except Exception:
+        pass
 
 
-def get_history_count(user_id: int) -> int:
+async def get_history_count(user_id: int) -> int:
     """Get the number of exchanges (pairs of user+assistant messages)."""
-    _ensure_loaded(user_id)
+    await _ensure_loaded(user_id)
     return len(_chat_histories.get(user_id, [])) // 2

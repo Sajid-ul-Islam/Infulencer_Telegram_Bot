@@ -4,7 +4,7 @@ The official Telegram Assistant for the Bearded Bangali content creator communit
 
 ## Features
 
-- **Multi-Platform Content Syndication**: Automatically fetches and posts latest YouTube, Medium, and Substack content to Telegram channel.
+- **Multi-Platform Content Syndication**: Automatically fetches and posts ONE piece of content daily from YouTube, Medium, Substack, Facebook, or Twitter to Telegram channel (avoids spam).
 - **Agentic RAG with Hybrid Search**: ChromaDB vector DB + BM25 keyword index + cross-encoder reranking for accurate answers from past content.
 - **Hisnul Muslim Dua Database**: 421 authentic Islamic duas scraped from https://dua.gtaf.org, vectorized for semantic search. Ask about any dua via the AI or `/dua` command.
 - **Quran Search**: All 114 surahs, 6236 verses with Arabic text, word-by-word meanings, and Sahih International translation. Search via `/quran` or the AI agent.
