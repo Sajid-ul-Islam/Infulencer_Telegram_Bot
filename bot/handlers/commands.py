@@ -140,6 +140,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/myduas - View your bookmarked duas\n"
         "/forget - Clear our conversation history\n"
         "/language - Set language preference\n"
+        "/trending - See what's popular today\n"
+        "/profile - View your stats & streak\n"
         "/help - Show all commands"
     )
     await update.message.reply_text(welcome_text, parse_mode="HTML")
@@ -292,6 +294,13 @@ async def dua_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Record daily engagement for streaks
+    try:
+        from bot.database import record_daily_engagement
+        record_daily_engagement(update.effective_user.id)
+    except Exception:
+        pass
+
     message_text = f"\U0001f54a <b>Hisnul Muslim Search Results</b>\n\n{html.escape(result)}"
 
     if len(message_text) > 4000:
@@ -334,6 +343,13 @@ async def quran_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
         return
+
+    # Record daily engagement for streaks
+    try:
+        from bot.database import record_daily_engagement
+        record_daily_engagement(update.effective_user.id)
+    except Exception:
+        pass
 
     message_text = f"\U0001f4dc <b>Quran Search Results</b>\n\n{html.escape(result)}"
     if len(message_text) > 4000:
@@ -405,12 +421,120 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/forget - Clear our conversation memory\n"
         "/language - Set language preference\n"
         "/suggest - Suggest a topic\n"
+        "/trending - See what's popular today\n"
+        "/profile - View your stats\n"
         "/help - This message\n\n"
         "<b>\U0001f4ac Just Ask!</b>\n"
         "Type any question and I'll answer using my knowledge base with AI.\n"
         "I remember our conversation context now!"
     )
     await update.message.reply_text(help_text, parse_mode="HTML")
+
+
+@track_usage("trending")
+async def trending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show trending topics, questions, and popular commands."""
+    from bot.database import get_top_keywords_from_questions, get_trending_questions, get_trending_searches
+
+    await update.message.chat.send_action(ChatAction.TYPING)
+
+    # Get keywords from recent questions
+    keywords = get_top_keywords_from_questions(limit=8)
+    # Get recent questions
+    questions = get_trending_questions(limit=5)
+    # Get popular commands
+    commands = get_trending_searches(limit=5)
+
+    parts = ["\U0001f525 <b>Trending Today</b>\n"]
+
+    if keywords:
+        kw_lines = "  ".join([f"#{k['keyword']}" for k in keywords])
+        parts.append(f"<b>\U0001f4ca Popular Topics:</b>\n{kw_lines}\n")
+
+    if questions:
+        q_lines = "\n".join([f"\u2022 {html.escape(q['question'][:80])}" for q in questions[:5]])
+        parts.append(f"<b>\u2753 Recent Questions:</b>\n{q_lines}\n")
+
+    if commands:
+        popular = [f"{c['command']} ({c['count']})" for c in commands if c['command'] not in ('ask_agent', 'callback')]
+        if popular:
+            parts.append(f"<b>\U0001f4ca Popular Commands:</b> {', '.join(popular[:5])}\n")
+
+    if not keywords and not questions and not commands:
+        parts.append("Not enough data yet. Keep chatting and check back later!")
+
+    parts.append("\n<i>Based on activity in the last 24 hours</i>")
+    await update.message.reply_text("\n".join(parts), parse_mode="HTML")
+
+
+@track_usage("profile")
+async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show user's engagement profile and stats."""
+    user_id = update.effective_user.id
+    username = update.effective_user.first_name
+
+    from bot.database import get_user_language, get_study_mode, get_user_bookmarks, get_bookmark_count
+    from bot.memory import get_history_count
+
+    lang = get_user_language(user_id) or "en"
+    lang_name = "Bengali \U0001f1e7\U0001f1e9" if lang == "bn" else "English \U0001f1ec\U0001f1e7"
+    study_book = get_study_mode(user_id)
+    bookmark_count = await get_bookmark_count(user_id)
+    history_count = await get_history_count(user_id)
+
+    # Get streak data
+    from bot.database import get_user_streak
+    streak = get_user_streak(user_id)
+
+    # Get user creation date and total activity
+    from bot.database import db
+    first_seen = None
+    total_questions = 0
+    if db:
+        try:
+            user_doc = db.collection("users").document(str(user_id)).get()
+            if user_doc.exists:
+                data = user_doc.to_dict()
+                first_seen = data.get("first_active") or data.get("last_active")
+                total_questions = data.get("total_clicks", 0)
+        except Exception:
+            pass
+
+    # Calculate days as member
+    days_member = ""
+    if first_seen:
+        import datetime
+        if hasattr(first_seen, 'days'):
+            days_member = f"{first_seen.days} days"
+        else:
+            try:
+                delta = datetime.datetime.utcnow() - first_seen.replace(tzinfo=None)
+                days_member = f"{delta.days} days"
+            except Exception:
+                days_member = "N/A"
+
+    # Build profile message
+    streak_text = f"\U0001f525 <b>{streak['current']}</b> day streak" if streak['current'] > 0 else "\u23f3 No active streak"
+    if streak['longest'] > 0:
+        streak_text += f" (best: {streak['longest']})"
+
+    study_text = f"\U0001f4da Studying: <b>{html.escape(study_book)}</b>" if study_book else "\U0001f4da Not in study mode"
+
+    profile = (
+        f"\U0001f464 <b>Your Profile</b>\n\n"
+        f"<b>\U0001f464 Name:</b> {html.escape(username)}\n"
+        f"<b>\U0001f310 Language:</b> {lang_name}\n"
+        f"<b>\U0001f4c5 Member for:</b> {days_member}\n\n"
+        f"<b>\U0001f4ca Activity:</b>\n"
+        f"  \u2753 Questions asked: <b>{total_questions}</b>\n"
+        f"  \U0001f4ac Conversations: <b>{history_count}</b>\n"
+        f"  \U0001f516 Bookmarks saved: <b>{bookmark_count}</b>\n\n"
+        f"{streak_text}\n"
+        f"{study_text}\n\n"
+        f"<i>Keep engaging to grow your streak!</i>"
+    )
+
+    await update.message.reply_text(profile, parse_mode="HTML")
 
 
 @track_usage("subscribe")

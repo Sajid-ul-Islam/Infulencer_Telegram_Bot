@@ -1,36 +1,33 @@
-# 📱 TELEGRAM CONTENT BOT - COMPLETE GUIDE
+# TELEGRAM CONTENT BOT - COMPLETE GUIDE
 
 ## What This Bot Does
 
-✅ **Auto-Posts Your Content**
+**Auto-Posts Your Content**
 - Posts ONE piece of content daily at 9 AM from YouTube, Medium, Substack, Facebook, or Twitter
 - Posts daily Islamic reminders (morning & evening)
 - Weekly digest every Saturday
 
-✅ **AI-Powered Q&A**
+**AI-Powered Q&A**
 - Multi-provider AI with 8 fallback providers
 - Hybrid RAG search over your content + Hisnul Muslim duas + Quran
 - Voice message transcription via Groq Whisper
 - Per-user conversation memory
 
-✅ **Influencer Features**
+**Influencer Features**
 - Content scheduling with Firestore persistence
 - Interactive quizzes for channel engagement
 - Channel subscriber stats
 - Personalized DM onboarding for new members
+- Streaks & gamification
 
-✅ **Multiple Commands**
-- `/latest` - Get all latest content
-- `/youtube` - Get latest video
-- `/medium` - Get latest article
-- `/ask` - Ask the AI anything
-- `/dua` - Search 421+ Hisnul Muslim duas
-- `/quran` - Search 6236 Quran verses
-- `/help` - Show all commands
+**Admin Dashboard**
+- Reply to Telegram/WhatsApp user queries directly from the dashboard
+- Manage FAQs, broadcasts, polls, giveaways
+- View analytics, trending topics, live logs
 
 ---
 
-## 🚀 DEPLOYMENT (Render)
+## DEPLOYMENT (Render)
 
 ### Step 1: Prepare Your Code
 
@@ -42,6 +39,7 @@ cd telegram-content-bot
 # Copy files:
 # - main.py
 # - bot/
+# - templates/
 # - requirements.txt
 # - .env (filled with your values)
 # - .gitignore
@@ -89,110 +87,43 @@ git push -u origin main
      OPENROUTER_API_KEY=sk-or-v1-...
      GROQ_API_KEY=gsk_...
      FIREBASE_CREDENTIALS={"type":"service_account",...}
+     DASHBOARD_PASSWORD=your_secure_password
      ```
 
 6. Click "Create Web Service"
-7. Wait for deployment ✅
+7. Wait for deployment
 
 ---
 
-## 🔑 Required Environment Variables
+## Required Environment Variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `TELEGRAM_TOKEN` | ✅ Yes | Bot token from @BotFather |
-| `CHANNEL_ID` | ✅ Yes | Telegram channel ID (starts with -100) |
-| `GROUP_ID` | ⚠️ Optional | Telegram group ID (enables moderation features) |
-| `ADMIN_ID` | ⚠️ Optional | Your Telegram user ID (enables admin commands) |
-| `FIREBASE_CREDENTIALS` | ✅ Yes | Firebase service account JSON |
-| `OPENROUTER_API_KEY` | ✅ Yes | Primary AI provider |
-| `GROQ_API_KEY` | ⚠️ Fallback | Fast inference + voice transcription |
-| `OPENAI_API_KEY` | ⚠️ Fallback | OpenAI direct API |
-| `ANTHROPIC_API_KEY` | ⚠️ Fallback | Anthropic Claude |
-| `GEMINI_API_KEY` | ⚠️ Fallback | Google Gemini |
-| `XAI_API_KEY` | ⚠️ Fallback | xAI Grok |
-| `DEEPSEEK_API_KEY` | ⚠️ Fallback | DeepSeek |
-| `OLLAMA_BASE_URL` | ⚠️ Optional | Local Ollama server URL |
-| `WEBHOOK_URL` | ⚠️ Optional | Explicit webhook URL (falls back to RENDER_EXTERNAL_URL) |
+| `TELEGRAM_TOKEN` | Yes | Bot token from @BotFather |
+| `CHANNEL_ID` | Yes | Telegram channel ID (starts with -100) |
+| `GROUP_ID` | Optional | Telegram group ID (enables moderation features) |
+| `ADMIN_ID` | Optional | Your Telegram user ID (enables admin commands) |
+| `FIREBASE_CREDENTIALS` | Yes | Firebase service account JSON |
+| `DASHBOARD_PASSWORD` | Yes | Password for admin dashboard (no default — must be set) |
+| `OPENROUTER_API_KEY` | Yes | Primary AI provider |
+| `GROQ_API_KEY` | Fallback | Fast inference + voice transcription |
+| `OPENAI_API_KEY` | Fallback | OpenAI direct API |
+| `ANTHROPIC_API_KEY` | Fallback | Anthropic Claude |
+| `GEMINI_API_KEY` | Fallback | Google Gemini |
+| `XAI_API_KEY` | Fallback | xAI Grok |
+| `DEEPSEEK_API_KEY` | Fallback | DeepSeek |
+| `OLLAMA_BASE_URL` | Optional | Local Ollama server URL |
+| `WEBHOOK_URL` | Optional | Explicit webhook URL (falls back to RENDER_EXTERNAL_URL) |
 
 ---
 
-## 🎯 CUSTOMIZE THE BOT
+## FEATURES EXPLAINED
 
-### 1. Update Your Platform Links
-
-Open `.env` (or `bot/config.py` default fallbacks) and find this section:
-
-```python
-# Your content platforms (update with your actual URLs)
-YOUTUBE_CHANNEL_ID = "UCxxxxxxxxxxxxxx"
-MEDIUM_USERNAME = "your_username"
-INSTAGRAM_HANDLE = "@your_instagram"
-YOUTUBE_LINK = "https://www.youtube.com/@your_channel"
-MEDIUM_LINK = "https://medium.com/@your_username"
-INSTAGRAM_LINK = "https://instagram.com/your_handle"
-TWITTER_LINK = "https://x.com/your_handle"
-FACEBOOK_LINK = "https://facebook.com/your_page"
-```
-
-### 2. Add/Edit FAQ Responses
-
-Find this section:
-
-```python
-FAQ = {
-    "how do you": "Your answer here",
-    "edit": "I use Adobe Premiere Pro...",
-    "content": "I create content about...",
-    "collab": "For collaboration...",
-    # Add more here
-}
-```
-
-**Example:**
-```python
-FAQ = {
-    "how do you edit": "I use Adobe Premiere Pro and Davinci Resolve",
-    "what camera": "I use Sony A6700",
-    "merch": "Check my shop at: [link]",
-    "sponsorship": "DM me on Instagram for brand deals",
-}
-```
-
-### 3. Customize Welcome Message
-
-Find `async def start()` function and edit the welcome text.
-
-### 4. Change Auto-Post Times
-
-Find this section in `main.py`:
-
-```python
-# Post latest YouTube daily at 9 AM
-job_queue.run_daily(auto_post_youtube, time=datetime.time(9, 0, tzinfo=BOT_TZ))
-
-# Post latest Medium daily at 6 PM
-job_queue.run_daily(auto_post_medium, time=datetime.time(18, 0, tzinfo=BOT_TZ))
-
-# Post latest Substack daily at 2 PM
-job_queue.run_daily(auto_post_substack, time=datetime.time(14, 0, tzinfo=BOT_TZ))
-
-# Post greeting daily at 8 AM
-job_queue.run_daily(greeting_post, time=datetime.time(8, 0, tzinfo=BOT_TZ))
-```
-
-Times are in 24-hour format with timezone support.
-
----
-
-## 📊 FEATURES EXPLAINED
-
-### Auto-Posting
-The bot checks for new content from:
-- **YouTube:** Uses RSS feed (checks daily at 9 AM)
-- **Medium:** Uses RSS feed (checks daily at 6 PM)
-- **Substack:** Uses RSS feed (checks daily at 2 PM)
-- Posts automatically to your channel
+### Content Posting (Once Daily)
+The bot posts ONE piece of content to the channel daily at 9 AM:
+- Picks a random platform (YouTube, Medium, Substack, Facebook, or Twitter)
+- Posts the latest or a random entry from that platform
+- Admin can use `/postlatest` to force-post all platforms manually
 
 ### AI Q&A System
 When someone DMs the bot or asks in a group:
@@ -201,7 +132,25 @@ When someone DMs the bot or asks in a group:
 3. Uses hybrid RAG (vector + BM25) to find relevant content
 4. Can call 5 tools: knowledge base, duas, Quran, FAQs, recent content
 5. Falls back through 8 AI providers if one fails
-6. Returns response with feedback buttons (👍/👎)
+6. Returns response with feedback buttons (thumbs up/down)
+
+### Streaks & Gamification
+- Users earn streaks for daily engagement (asking questions, searching duas/Quran, bookmarking)
+- Streak increments if active yesterday, resets if inactive 2+ days
+- View streak with `/profile`
+- Firestore collection: `user_streaks`
+
+### Admin Manual Reply
+- Admin opens "Reply to Users" tab in dashboard
+- Sees pending queries from Telegram and WhatsApp users
+- Clicks a query, types a reply, sends it
+- Reply delivered to user via Telegram Bot API or WhatsApp Meta API
+- Firestore collection: `pending_queries`
+
+### Trending Topics
+- `/trending` shows popular keywords, recent questions, and popular commands
+- Based on activity in the last 24 hours
+- Keywords extracted from user questions with stop-word filtering
 
 ### Content Scheduling
 ```
@@ -211,15 +160,9 @@ When someone DMs the bot or asks in a group:
 ```
 Posts are persisted to Firestore and survive Render restarts.
 
-### Interactive Quizzes
-```
-/quiz "Capital of France?" "Paris" "London" "Berlin" "Paris is the capital of France."
-```
-Correct answer is always the first option. Sent as a Telegram quiz to the channel.
-
 ---
 
-## 🔧 TROUBLESHOOTING
+## TROUBLESHOOTING
 
 **Bot not posting to channel?**
 - Check CHANNEL_ID is correct (should start with -100)
@@ -231,6 +174,10 @@ Correct answer is always the first option. Sent as a Telegram quiz to the channe
 - Ensure at least OPENROUTER_API_KEY or GROQ_API_KEY is set
 - Check Render logs for provider errors
 
+**Dashboard not accessible?**
+- Ensure DASHBOARD_PASSWORD is set in environment variables
+- No default password — must be explicitly configured
+
 **Voice messages not working?**
 - Ensure GROQ_API_KEY is set (uses Groq Whisper)
 - Check voice transcription rate limits
@@ -238,28 +185,16 @@ Correct answer is always the first option. Sent as a Telegram quiz to the channe
 **Check Logs on Render:**
 - Go to your service
 - Click "Logs" tab
-- Look for ✅/⚠️/🚫 provider status at startup
+- Look for provider status at startup
 
 ---
 
-## ✨ YOU'RE ALL SET!
-
-Your bot is now:
-- ✅ Running 24/7 on Render
-- ✅ Auto-posting your content
-- ✅ Answering follower questions with AI
-- ✅ Searching duas and Quran verses
-- ✅ Scheduling content for later
-- ✅ Running interactive quizzes
-- ✅ Connecting all your platforms
-
-Monitor it anytime from your Render dashboard. Update the code and just push to GitHub—Render auto-deploys!
-
-Questions? Check Render logs or test locally first:
+## LOCAL DEVELOPMENT
 
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env  # Fill in your values
 python main.py
 ```

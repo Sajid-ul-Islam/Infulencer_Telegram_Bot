@@ -186,6 +186,87 @@ def get_trending_searches(limit: int = 10) -> list[dict]:
         logger.error(f"get_trending_searches error: {e}")
         return []
 
+
+def get_trending_questions(limit: int = 10) -> list[dict]:
+    """Get the most recent questions asked by users."""
+    if not db:
+        return []
+    try:
+        import datetime
+        now = datetime.datetime.utcnow()
+        day_ago = now - datetime.timedelta(hours=24)
+        docs = (
+            db.collection("questions")
+            .where("timestamp", ">=", day_ago)
+            .order_by("timestamp", direction="DESCENDING")
+            .limit(200)
+            .stream()
+        )
+        questions = []
+        for doc in docs:
+            d = doc.to_dict()
+            q = d.get("question", "").strip()
+            if q and len(q) > 5:
+                questions.append({
+                    "question": q[:120],
+                    "username": d.get("username", "Anonymous"),
+                })
+        return questions[:limit]
+    except Exception as e:
+        logger.error(f"get_trending_questions error: {e}")
+        return []
+
+
+def get_top_keywords_from_questions(limit: int = 8) -> list[dict]:
+    """Extract the most common meaningful keywords from recent questions."""
+    if not db:
+        return []
+    try:
+        import datetime
+        import re
+        from collections import Counter
+
+        now = datetime.datetime.utcnow()
+        day_ago = now - datetime.timedelta(hours=24)
+        docs = (
+            db.collection("questions")
+            .where("timestamp", ">=", day_ago)
+            .order_by("timestamp", direction="DESCENDING")
+            .limit(200)
+            .stream()
+        )
+
+        stop_words = {
+            "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+            "have", "has", "had", "do", "does", "did", "will", "would", "could",
+            "should", "may", "might", "shall", "can", "need", "dare", "ought",
+            "used", "to", "of", "in", "for", "on", "with", "at", "by", "from",
+            "as", "into", "through", "during", "before", "after", "above", "below",
+            "between", "out", "off", "over", "under", "again", "further", "then",
+            "once", "here", "there", "when", "where", "why", "how", "all", "each",
+            "every", "both", "few", "more", "most", "other", "some", "such", "no",
+            "nor", "not", "only", "own", "same", "so", "than", "too", "very",
+            "just", "don", "now", "what", "which", "who", "whom", "this", "that",
+            "these", "those", "about", "up", "it", "its", "i", "me", "my", "you",
+            "your", "he", "him", "his", "she", "her", "we", "us", "our", "they",
+            "them", "their", "and", "but", "or", "if", "because", "while", "although",
+            "bot", "ask", "please", "tell", "know", "like", "get", "make",
+        }
+
+        word_counts = Counter()
+        for doc in docs:
+            d = doc.to_dict()
+            q = d.get("question", "").lower()
+            words = re.findall(r'\b[a-z]{3,}\b', q)
+            for w in words:
+                if w not in stop_words:
+                    word_counts[w] += 1
+
+        return [{"keyword": word, "count": count} for word, count in word_counts.most_common(limit)]
+    except Exception as e:
+        logger.error(f"get_top_keywords error: {e}")
+        return []
+
 def get_token_usage_stats() -> dict:
     if not db:
         return {"total_tokens": 0, "by_provider": {}, "total_cost": 0}
@@ -573,3 +654,131 @@ def get_study_mode(user_id: int) -> Optional[str]:
     except Exception as e:
         logger.error(f"Error getting study mode for {user_id}: {e}")
         return None
+
+
+# ═════════════════════════════════════════════════════════════════
+#  STREAKS & GAMIFICATION
+# ═════════════════════════════════════════════════════════════════
+
+STREAKS_COLLECTION = "user_streaks"
+
+
+def record_daily_engagement(user_id: int) -> dict:
+    """Record that a user was active today. Returns updated streak info.
+
+    Call this on every meaningful interaction (asking questions, searching, bookmarking).
+    Uses Firestore to persist streaks across restarts.
+    """
+    if not db:
+        return {"current": 0, "longest": 0, "last_active": None}
+
+    try:
+        import datetime
+        today = datetime.date.today()
+        today_str = today.isoformat()
+        ref = db.collection(STREAKS_COLLECTION).document(str(user_id))
+        doc = ref.get()
+
+        if doc.exists:
+            data = doc.to_dict()
+            current = data.get("current", 0)
+            longest = data.get("longest", 0)
+            last_active_str = data.get("last_active", "")
+
+            try:
+                last_active = datetime.date.fromisoformat(last_active_str) if last_active_str else None
+            except (ValueError, TypeError):
+                last_active = None
+
+            if last_active == today:
+                # Already active today — no change
+                return {"current": current, "longest": longest, "last_active": today_str}
+
+            if last_active and (today - last_active).days == 1:
+                # Consecutive day
+                current += 1
+            elif last_active and (today - last_active).days == 0:
+                current = max(current, 1)
+            else:
+                # Streak broken or first time
+                current = 1
+
+            longest = max(longest, current)
+            ref.set({
+                "current": current,
+                "longest": longest,
+                "last_active": today_str,
+                "updated_at": google_firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+            return {"current": current, "longest": longest, "last_active": today_str}
+        else:
+            # First engagement ever
+            ref.set({
+                "user_id": user_id,
+                "current": 1,
+                "longest": 1,
+                "last_active": today_str,
+                "updated_at": google_firestore.SERVER_TIMESTAMP,
+            })
+            return {"current": 1, "longest": 1, "last_active": today_str}
+    except Exception as e:
+        logger.error(f"Error recording streak for {user_id}: {e}")
+        return {"current": 0, "longest": 0, "last_active": None}
+
+
+def get_user_streak(user_id: int) -> dict:
+    """Get a user's current and longest streak."""
+    if not db:
+        return {"current": 0, "longest": 0, "last_active": None}
+
+    try:
+        import datetime
+        doc = db.collection(STREAKS_COLLECTION).document(str(user_id)).get()
+        if doc.exists:
+            data = doc.to_dict()
+            current = data.get("current", 0)
+            longest = data.get("longest", 0)
+            last_active_str = data.get("last_active", "")
+
+            # Check if streak is still active (yesterday or today)
+            try:
+                last_active = datetime.date.fromisoformat(last_active_str) if last_active_str else None
+            except (ValueError, TypeError):
+                last_active = None
+
+            today = datetime.date.today()
+            if last_active and (today - last_active).days > 1:
+                # Streak broken — reset current
+                current = 0
+
+            return {"current": current, "longest": longest, "last_active": last_active_str}
+        return {"current": 0, "longest": 0, "last_active": None}
+    except Exception as e:
+        logger.error(f"Error getting streak for {user_id}: {e}")
+        return {"current": 0, "longest": 0, "last_active": None}
+
+
+def get_leaderboard(limit: int = 10) -> list[dict]:
+    """Get the top users by longest streak."""
+    if not db:
+        return []
+    try:
+        docs = (
+            db.collection(STREAKS_COLLECTION)
+            .order_by("longest", direction="DESCENDING")
+            .limit(limit)
+            .stream()
+        )
+        leaderboard = []
+        for i, doc in enumerate(docs, 1):
+            data = doc.to_dict()
+            leaderboard.append({
+                "rank": i,
+                "user_id": data.get("user_id", doc.id),
+                "current": data.get("current", 0),
+                "longest": data.get("longest", 0),
+            })
+        return leaderboard
+    except Exception as e:
+        logger.error(f"Error getting leaderboard: {e}")
+        return []

@@ -14,7 +14,7 @@ from bot.handlers.commands import (
     start, socials_command, latest, youtube, medium, substack,
     ask_command, dua_command, quran_command, forget_command, ingest_command, help_command,
     subscribe_command, unsubscribe_command, language_command, reminder_time_command, myduas_command,
-    study_command, stopstudy_command, ingestdoc_command
+    study_command, stopstudy_command, ingestdoc_command, trending_command, profile_command
 )
 from bot.handlers.admin import (
     postlatest_command, ban_command, mute_command, questions_command,
@@ -105,7 +105,9 @@ async def post_init(application: Application):
         BotCommand("unsubscribe", "Stop daily reminders"),
         BotCommand("remindertime", "Change reminder time"),
         BotCommand("myduas", "View your bookmarked duas"),
-        BotCommand("language", "Set language preference")
+        BotCommand("language", "Set language preference"),
+        BotCommand("trending", "See what's popular today"),
+        BotCommand("profile", "View your stats and streak"),
     ]
     try:
         await application.bot.set_my_commands(commands, scope=BotCommandScopeDefault())
@@ -174,6 +176,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("ingest", ingest_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("suggest", suggest_command))
+    application.add_handler(CommandHandler("trending", trending_command))
+    application.add_handler(CommandHandler("profile", profile_command))
 
     application.add_handler(CommandHandler("postlatest", postlatest_command))
     application.add_handler(CommandHandler("ban", ban_command))

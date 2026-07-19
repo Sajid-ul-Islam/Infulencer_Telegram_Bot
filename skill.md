@@ -37,7 +37,7 @@ This file documents the specialized skills the bot possesses.
 - **Ingestion**: Automatically indexed on startup; deduplicates by verse ID.
 
 ## 5. Multi-Tool AI Agent
-The bot uses OpenAI-compatible function calling with 5 tools:
+The bot uses OpenAI-compatible function calling with 6 tools:
 - `search_knowledge_base` — hybrid RAG search over creator content
 - `search_dua` — vector search over Hisnul Muslim duas
 - `search_quran` — vector search over Quran verses
@@ -61,7 +61,7 @@ The agent can call multiple tools in sequence, up to 3 rounds, before generating
 Circuit breaker: Providers that fail 3 times are skipped for 5 minutes.
 
 ## 7. Conversation Memory
-Per-user chat history stored in-memory (last 5 exchanges). Users can clear with `/forget`. Memory is injected into the system prompt for context-aware conversations. Automatic summarization when history exceeds limit.
+Per-user chat history stored in Firestore with async loading. Users can clear with `/forget`. Memory is injected into the system prompt for context-aware conversations. Automatic summarization when history exceeds limit.
 
 ## 8. Feedback System
 Thumbs up/down inline buttons on every AI response. Feedback stored in Firestore `feedback` collection. Displayed in dashboard and `/stats`.
@@ -84,26 +84,49 @@ Thumbs up/down inline buttons on every AI response. Feedback stored in Firestore
 - **Format**: Telegram quiz with correct answer always as first option.
 - **Explanation**: Optional explanation text shown after answer.
 
-## 12. Dynamic Firebase Storage
-Integrates with Google Cloud Firestore via `firebase-admin`.
-- **Collections**: `faqs`, `questions`, `suggestions`, `giveaway_entries`, `activity_logs`, `users`, `feedback`, `subscriptions`, `token_usage`, `user_tokens`, `usage`, `user_bookmarks`, `scheduled_posts`
+## 12. Streaks & Gamification
+- **Daily Engagement**: Tracks user activity (questions, searches, bookmarks) in `user_streaks` Firestore collection.
+- **Streak Logic**: Increments if active yesterday, resets if inactive 2+ days.
+- **Profile**: `/profile` shows user stats including current streak, longest streak, bookmarks, questions asked.
+- **Recording**: Automatic on AI questions, dua search, Quran search, bookmarking.
 
-## 13. Community Moderation
+## 13. Trending Topics
+- **`/trending`**: Shows popular keywords from recent questions, recent questions list, and popular commands.
+- **Keyword Extraction**: Extracts meaningful words from user questions with stop-word filtering.
+- **Time Window**: Based on activity in the last 24 hours.
+
+## 14. Admin Manual Reply
+- **Pending Queries Inbox**: User questions stored in `pending_queries` Firestore collection.
+- **Dashboard UI**: "Reply to Users" tab in admin dashboard shows pending queries.
+- **Platform Support**: Can reply to Telegram users (via Bot API) and WhatsApp users (via Meta Graph API).
+- **Query History**: View all past queries with status (pending/answered/dismissed).
+- **Dismiss**: Admin can dismiss queries without replying.
+
+## 15. Dynamic Firebase Storage
+Integrates with Google Cloud Firestore via `firebase-admin`.
+- **Collections**: `faqs`, `questions`, `suggestions`, `giveaway_entries`, `activity_logs`, `users`, `feedback`, `subscriptions`, `token_usage`, `user_tokens`, `usage`, `user_bookmarks`, `scheduled_posts`, `user_streaks`, `pending_queries`, `chat_histories`
+
+## 16. Community Moderation
 - **Anti-Spam**: In Supergroups, auto-deletes messages with `http://` or `https://` from non-admins.
 - **Mute/Ban**: Admin can reply with `/ban` or `/mute`.
 - **Dashboard Moderation**: Ban/mute/unmute via web dashboard API endpoints.
 
-## 14. Personalized Onboarding
+## 17. Personalized Onboarding
 - **Welcome Message**: New group members receive a greeting in the group.
 - **DM Onboarding**: New members receive a personalized DM with command hints and welcome text.
 - **Privacy-Aware**: Gracefully handles users with privacy settings blocking DMs.
 
-## 15. API Key Validation
+## 18. API Key Validation
 - **Startup Check**: `validate_ai_keys()` runs at startup and logs diagnostics.
-- **Emoji Indicators**: ✅ for configured, ⚠️ for missing, 🚫 for none configured.
+- **Emoji Indicators**: Configured/missing/none configured.
 - **Live Testing**: `/checkkeys` command tests all providers live from Telegram.
 
-## 16. Render Keep-Alive System
+## 19. Render Keep-Alive System
 - **Dummy Server**: Lightweight HTTPServer on port 8080.
 - **Self-Pinger**: GET request to `RENDER_EXTERNAL_URL` every 10 minutes.
 - **FastAPI**: Webhook handler + dashboard API served via uvicorn.
+
+## 20. Dashboard Security
+- **Rate Limiting**: Max 5 login attempts per IP per 5 minutes.
+- **Required Password**: `DASHBOARD_PASSWORD` must be set (no default).
+- **503 When Unconfigured**: Dashboard returns error if no password is set.

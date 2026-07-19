@@ -46,7 +46,13 @@ async def handle_bookmark_add(query, parts: list, user_id: int) -> None:
 
     success = save_bookmark(user_id, item_id, doc_type, title, snippet, url)
     if success:
-        await query.answer("🔖 Saved! Use /myduas to view.")
+        await query.answer("\U0001f516 Saved! Use /myduas to view.")
+        # Record daily engagement for streaks
+        try:
+            from bot.database import record_daily_engagement
+            record_daily_engagement(user_id)
+        except Exception:
+            pass
         try:
             markup = list(query.message.reply_markup.inline_keyboard) if query.message.reply_markup else []
             new_markup = InlineKeyboardMarkup([

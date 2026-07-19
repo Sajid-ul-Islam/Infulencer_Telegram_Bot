@@ -43,6 +43,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "timestamp": firestore.SERVER_TIMESTAMP
             })
             track_activity(user_id, username, "ask_agent")
+            # Store pending query for admin reply dashboard
+            try:
+                from bot.fastapi_app import store_pending_query
+                store_pending_query(user_id, username, user_message, "telegram")
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"Firebase error: {e}")
     else:

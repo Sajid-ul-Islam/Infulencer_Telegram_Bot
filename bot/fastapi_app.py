@@ -591,3 +591,196 @@ async def post_content_to_channel(request: Request):
         raise HTTPException(status_code=500, detail=res.text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═════════════════════════════════════════════════════════════════
+#  ADMIN MANUAL REPLY — Pending Queries from Telegram & WhatsApp
+# ═════════════════════════════════════════════════════════════════
+
+PENDING_QUERIES_COLLECTION = "pending_queries"
+
+
+@app.get("/api/queries/pending", dependencies=[Depends(check_auth)])
+async def get_pending_queries():
+    """Get all pending (unanswered) queries from Telegram and WhatsApp users."""
+    if not db:
+        return {"queries": []}
+    try:
+        from bot.database import db as firestore_db
+        docs = (
+            firestore_db.collection(PENDING_QUERIES_COLLECTION)
+            .where("status", "==", "pending")
+            .order_by("timestamp", direction="DESCENDING")
+            .limit(50)
+            .stream()
+        )
+        queries = []
+        for doc in docs:
+            d = doc.to_dict()
+            queries.append({
+                "id": doc.id,
+                "user_id": d.get("user_id", ""),
+                "username": d.get("username", "Unknown"),
+                "platform": d.get("platform", "unknown"),
+                "question": d.get("question", ""),
+                "timestamp": str(d.get("timestamp", "")),
+            })
+        return {"queries": queries}
+    except Exception as e:
+        logger.error(f"Error fetching pending queries: {e}")
+        return {"queries": []}
+
+
+@app.get("/api/queries/all", dependencies=[Depends(check_auth)])
+async def get_all_queries():
+    """Get all queries (pending + answered) for the admin inbox."""
+    if not db:
+        return {"queries": []}
+    try:
+        from bot.database import db as firestore_db
+        docs = (
+            firestore_db.collection(PENDING_QUERIES_COLLECTION)
+            .order_by("timestamp", direction="DESCENDING")
+            .limit(100)
+            .stream()
+        )
+        queries = []
+        for doc in docs:
+            d = doc.to_dict()
+            queries.append({
+                "id": doc.id,
+                "user_id": d.get("user_id", ""),
+                "username": d.get("username", "Unknown"),
+                "platform": d.get("platform", "unknown"),
+                "question": d.get("question", ""),
+                "status": d.get("status", "pending"),
+                "reply": d.get("reply", ""),
+                "answered_by": d.get("answered_by", ""),
+                "timestamp": str(d.get("timestamp", "")),
+            })
+        return {"queries": queries}
+    except Exception as e:
+        logger.error(f"Error fetching queries: {e}")
+        return {"queries": []}
+
+
+@app.post("/api/queries/reply", dependencies=[Depends(check_auth)])
+async def reply_to_query(request: Request):
+    """Reply to a user's query via Telegram or WhatsApp."""
+    data = await request.json()
+    query_id = data.get("query_id", "")
+    reply_text = data.get("reply", "").strip()
+    platform = data.get("platform", "telegram")
+    user_id = data.get("user_id", "")
+
+    if not reply_text:
+        raise HTTPException(status_code=400, detail="Reply text is required")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="User ID is required")
+
+    sent = False
+    error_msg = ""
+
+    # Send via Telegram
+    if platform == "telegram" and TELEGRAM_TOKEN:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": int(user_id),
+                "text": f"\U0001f4ac <b>Admin Reply:</b>\n\n{reply_text}",
+                "parse_mode": "HTML",
+            }
+            res = requests.post(url, json=payload, timeout=10)
+            sent = res.status_code == 200
+            if not sent:
+                error_msg = f"Telegram API error: {res.text[:200]}"
+        except Exception as e:
+            error_msg = f"Telegram send error: {str(e)}"
+
+    # Send via WhatsApp (Meta API)
+    elif platform == "whatsapp" and META_ACCESS_TOKEN:
+        try:
+            from bot.config import WHATSAPP_PHONE_NUMBER_ID
+            phone_id = WHATSAPP_PHONE_NUMBER_ID
+            if not phone_id:
+                # Try to extract from webhook payload history
+                error_msg = "WHATSAPP_PHONE_NUMBER_ID not configured"
+            else:
+                url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "to": user_id,
+                    "type": "text",
+                    "text": {"body": reply_text},
+                }
+                headers = {"Authorization": f"Bearer {META_ACCESS_TOKEN}"}
+                res = requests.post(url, json=payload, headers=headers, timeout=10)
+                sent = res.status_code == 200
+                if not sent:
+                    error_msg = f"WhatsApp API error: {res.text[:200]}"
+        except Exception as e:
+            error_msg = f"WhatsApp send error: {str(e)}"
+
+    # Mark as answered in Firestore
+    if db and query_id:
+        try:
+            from bot.database import db as firestore_db
+            from google.cloud import firestore as gf
+            firestore_db.collection(PENDING_QUERIES_COLLECTION).document(query_id).update({
+                "status": "answered",
+                "reply": reply_text,
+                "answered_by": "admin",
+                "answered_at": gf.SERVER_TIMESTAMP,
+            })
+        except Exception as e:
+            logger.error(f"Error updating query status: {e}")
+
+    if sent:
+        return {"status": "success", "message": f"Reply sent via {platform}"}
+    else:
+        return {"status": "error", "error": error_msg or f"Failed to send via {platform}"}
+
+
+@app.post("/api/queries/dismiss", dependencies=[Depends(check_auth)])
+async def dismiss_query(request: Request):
+    """Dismiss a query without replying (mark as dismissed)."""
+    data = await request.json()
+    query_id = data.get("query_id", "")
+    if not query_id:
+        raise HTTPException(status_code=400, detail="Query ID is required")
+
+    if db:
+        try:
+            from bot.database import db as firestore_db
+            from google.cloud import firestore as gf
+            firestore_db.collection(PENDING_QUERIES_COLLECTION).document(query_id).update({
+                "status": "dismissed",
+                "answered_by": "admin",
+                "answered_at": gf.SERVER_TIMESTAMP,
+            })
+            return {"status": "success"}
+        except Exception as e:
+            logger.error(f"Error dismissing query: {e}")
+    return {"status": "error", "error": "Database not configured"}
+
+
+# ═════════════════════════════════════════════════════════════════
+#  Helper: Store incoming user query for admin reply
+# ═════════════════════════════════════════════════════════════════
+
+def store_pending_query(user_id: int, username: str, question: str, platform: str = "telegram"):
+    """Store a user query in Firestore so the admin can reply from the dashboard."""
+    if not db:
+        return
+    try:
+        from google.cloud import firestore as gf
+        db.collection(PENDING_QUERIES_COLLECTION).add({
+            "user_id": str(user_id),
+            "username": username,
+            "question": question,
+            "platform": platform,
+            "status": "pending",
+            "timestamp": gf.SERVER_TIMESTAMP,
+        })
+    except Exception as e:
+        logger.error(f"Error storing pending query: {e}")

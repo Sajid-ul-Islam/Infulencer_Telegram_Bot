@@ -12,10 +12,13 @@ The official Telegram Assistant for the Bearded Bangali content creator communit
 - **8-Provider AI Fallback**: OpenRouter (primary) → Groq → Gemini 2.0 → OpenAI → DeepSeek → Anthropic → xAI Grok-3 → Ollama (local).
 - **Conversation Memory**: Per-user chat history remembered across messages. Clear with `/forget`.
 - **Bookmarks**: Save duas, Quran verses, and search results for quick access. Manage via `/myduas`.
+- **Streaks & Gamification**: Track daily engagement streaks. View your stats with `/profile`.
+- **Admin Manual Reply**: Reply to Telegram/WhatsApp user queries directly from the admin dashboard.
+- **Trending Topics**: See what's popular with `/trending` — shows recent questions, keywords, and popular commands.
 - **Content Scheduling**: Schedule posts to the channel at specific times. Persists to Firestore to survive Render restarts.
 - **Feedback System**: Thumbs up/down on every AI response, stored in Firestore.
-- **Firebase Sync**: FAQs, questions, suggestions, feedback, giveaway entries, bookmarks, scheduled posts, and activity logs stored in Firestore.
-- **Admin Dashboard**: Full SPA web dashboard at `/` with analytics, FAQ management, broadcasting, polls, giveaways, moderation, and live logs.
+- **Firebase Sync**: FAQs, questions, suggestions, feedback, giveaway entries, bookmarks, scheduled posts, streaks, and activity logs stored in Firestore.
+- **Admin Dashboard**: Full SPA web dashboard at `/` with analytics, FAQ management, broadcasting, polls, giveaways, moderation, query inbox, and live logs.
 - **Anti-Spam**: Automatic link deletion in group chats for non-admins.
 - **Personalized Onboarding**: New group members receive a DM with command hints and welcome message.
 - **Render Keep-Alive**: HTTP server + self-pinger to prevent Render free-tier sleep.
@@ -53,6 +56,8 @@ The first startup will:
 | `/unsubscribe` | Stop daily reminders |
 | `/remindertime` | Set reminder time (morning/evening) |
 | `/language` | Set preferred language (EN/BN) |
+| `/trending` | See what's popular today |
+| `/profile` | View your stats & streak |
 | `/help` | Show all commands |
 
 ### Admin Commands
@@ -88,22 +93,21 @@ The first startup will:
 bot/
 ├── ai.py              # Multi-tool agent + 8-provider cascade
 ├── config.py          # Environment config + startup validation
-├── database.py        # Firebase CRUD (FAQs, bookmarks, scheduled posts, etc.)
+├── database.py        # Firebase CRUD (FAQs, bookmarks, streaks, etc.)
 ├── dua_scraper.py     # Hisnul Muslim scraper & ingester
-├── fastapi_app.py     # FastAPI webhook handler + dashboard API
-├── jobs.py            # Scheduled content posting
-├── memory.py          # Conversation history
+├── fastapi_app.py     # FastAPI webhook handler + dashboard API + admin reply
+├── jobs.py            # Scheduled content posting (DRY with generic helpers)
+├── memory.py          # Conversation history (async Firestore calls)
 ├── pipeline.py        # Content ingestion pipeline
 ├── quran_scraper.py   # Quran data scraper & ingester
-├── rss.py             # RSS feed parsers
+├── rss.py             # RSS feed parsers (DRY with generic fetcher)
 ├── search.py          # BM25, hybrid search, dua/quran search
-├── server.py          # Admin web dashboard (SPA)
 ├── transcriber.py     # Voice transcription via Groq Whisper
 ├── vectordb.py        # ChromaDB vector store
 ├── handlers/
 │   ├── admin.py       # Admin command handlers
 │   ├── bookmarks.py   # Bookmark add/remove/view callbacks
-│   ├── commands.py    # User command handlers
+│   ├── commands.py    # User commands (including /trending, /profile)
 │   ├── feedback.py    # Feedback callbacks
 │   ├── influencer.py  # Scheduling, quizzes, channel stats
 │   ├── inline.py      # Inline query handler
@@ -114,8 +118,8 @@ bot/
 main.py                # Entry point
 requirements.txt       # Dependencies
 knowledge_base.json    # Static KB source
-agent.md               # Agentic RAG docs
-skill.md               # Bot skills docs
+templates/
+└── dashboard.html     # Admin dashboard SPA
 ```
 
 ## Provider Cascade

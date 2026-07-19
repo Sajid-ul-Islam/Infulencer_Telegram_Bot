@@ -353,6 +353,13 @@ async def get_ai_response(user_message: str, user_id: Optional[int] = None, use_
                 if use_memory and user_id:
                     await add_to_history(user_id, "user", user_message)
                     await add_to_history(user_id, "assistant", final_res)
+
+                    # Record daily engagement for streaks
+                    try:
+                        from bot.database import record_daily_engagement
+                        record_daily_engagement(user_id)
+                    except Exception:
+                        pass
                     
                     history_len = len(_chat_histories.get(user_id, []))
                     if history_len > MAX_HISTORY * 2:
